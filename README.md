@@ -1,4 +1,3 @@
-# Non-Trivial Fellowship Project
 
 ## Abstract
 
