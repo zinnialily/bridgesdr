@@ -24,4 +24,4 @@ Future work should focus on:
 - [SEN1-2: A Curated Dataset of Sentinel-1 and Sentinel-2 Imagery](https://mediatum.ub.tum.de/1436631)
 
 ---
-**Link to the full paper:** [https://pdflink.to/aanya-singh-non-trivial/](https://pdflink.to/aanya-singh-non-trivial/)
+**Link to the full paper:** [https://pdflink.to/bridgesdrpaper/](https://pdflink.to/bridgesdrpaper/)
