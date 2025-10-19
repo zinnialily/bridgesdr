@@ -101,39 +101,41 @@ for all-weather disaster response.
 
 ```
 bridgesdr/
-├── data/                                   # Dataset storage (created by scripts)
-│   ├── xbd_raw/                           # Raw xBD dataset
-│   ├── bright_raw/                        # Raw BRIGHT dataset
-│   ├── xbd/                               # Processed xBD
+├── data/                                   
+│   ├── xbd_raw/                          
+│   ├── bright_raw/                      
+│   ├── xbd/                              
 │   │   ├── train/images/
 │   │   ├── train/labels/
 │   │   ├── test/images/
 │   │   ├── test/labels/
-│   │   ├── tier1/, tier3/, hold/         # Additional splits
-│   └── bright/                            # Processed BRIGHT
+│   │   ├── tier1/, tier3/, hold/         
+│   └── bright/                      
 │       ├── lic/images/, lic/masks/
 │       ├── mic/images/, mic/masks/
 │       └── hic/images/, hic/masks/
 │
-├── reproduction_scripts/                   # All reproduction scripts
-│   ├── 01_download_datasets.sh            # Dataset download automation
-│   ├── 02_preprocess_data.py              # Data preprocessing
-│   │
-│   ├── synthetic_imagery_quality_assessment/
-│   │   ├── reproduce_disastergan_xbd.py   # DisasterGAN training
-│   │   ├── evaluation.py                  # Quality metrics evaluation
-│   │   ├── requirements.txt               # Study 1 dependencies
-│   │   └── ATTRIBUTION.md                 # Attribution info
-│   │
-│   └── training_effectiveness_assessment/
-│       ├── 01_train_baseline_unet.py      # Baseline U-Net training
-│       ├── 02_finetune_half_stage.py      # Stage 1: decoder fine-tuning
-│       └── 03_finetune_full_stage.py      # Stage 2: full fine-tuning
+├── reproduction_scripts/
+│ ├── 01_download_datasets.sh # Downloads xBD and BRIGHT
+│ ├── 02_preprocess_data.py # Organizes data into standard format
+│ │
+│ ├── synthetic_imagery_quality_assessment/ # Synthetic generation & validation
+│ │ ├── 03_train_disastergan.py
+│ │ ├── 04_generate_synthetic_images.py
+│ │ ├── 05_convert_optical_to_sar.py
+│ │ ├── 06_generate_damage_masks.py
+│ │ └── 07_evaluate_quality_metrics.py
+│ │
+│ └── training_effectiveness_assessment/ # Fine-tuning and evaluation pipeline
+│ ├── 08_train_baseline_unet.py
+│ ├── 09_finetune_half_stage.py
+│ ├── 10_finetune_full_stage.py
+│ └── 11_evaluation.py
 │
-├── checkpoints/                            # Model checkpoints (created by training)
-├── ATTRIBUTION.md                          # Dataset and code attributions
-├── requirements.txt                        # Python dependencies
-└── README.md                              # This file
+├── checkpoints/
+├── ATTRIBUTION.md
+├── requirements.txt
+└── README.md # This file
 ```
 
 ---
@@ -445,11 +447,12 @@ See `requirements.txt` for complete list. Key dependencies:
 ### This Work
 
 ```bibtex
-@inproceedings{singh2024bridging,
-  title={Bridging the Post-Disaster Imagery Gap: Leveraging Synthetic Data for Disaster Response across Economic Spectra},
-  author={Singh, Aanya},
-  booktitle={NeurIPS 2024},
-  year={2024}
+@misc{singh2025bridging,
+  title = {Bridging the Post-Disaster Imagery Gap: Leveraging Synthetic Data for Disaster Response across Economic Spectra},
+  author = {Singh, Aanya},
+  year = {2025},
+  month = {August 09},
+  note = {Available at SSRN: https://ssrn.com/abstract=5385441 or http://dx.doi.org/10.2139/ssrn.5385441}
 }
 ```
 
@@ -502,15 +505,6 @@ This project is licensed under the MIT License. See `LICENSE` file for details.
 - **Humanitarian OpenStreetMap Team** for practical disaster response insights
 
 ---
-
-## Contact
-
-For questions or collaboration:
-- **GitHub Issues:** https://github.com/zinnialily/bridgesdr/issues
-- **Email:** [your-email]
-
----
-
 ## Troubleshooting
 
 ### Common Issues
