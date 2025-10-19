@@ -1,3 +1,4 @@
+**Link to the full paper:** [https://dx.doi.org/10.2139/ssrn.5385441](https://dx.doi.org/10.2139/ssrn.5385441)
 ## Abstract
 Low- and middle-income countries (LMICs) face particular challenges in disaster response due to limited access to high-quality post-disaster imagery and models trained predominantly on high-income country (HIC) datasets. Current computer vision damage assessment models exhibit significant performance disparities across economic contexts, creating equity concerns in global disaster management.
 
@@ -24,4 +25,3 @@ Future work should focus on:
 - [SEN1-2: A Curated Dataset of Sentinel-1 and Sentinel-2 Imagery](https://mediatum.ub.tum.de/1436631)
 
 ---
-**Link to the full paper:** [https://pdflink.to/bridgesdrpaper/](https://pdflink.to/bridgesdrpaper/)
