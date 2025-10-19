@@ -152,19 +152,137 @@ def classify_by_income(country: str) -> Optional[str]:
 # xBD Preprocessing
 ################################################################################
 
+def tile_image(image_path, output_dir, tile_size=64, original_size=256):
+    """
+    Tile an image into smaller patches.
+    
+    Args:
+        image_path: Path to input image
+        output_dir: Directory to save tiles
+        tile_size: Size of each tile (default 64x64)
+        original_size: Expected input image size (default 256x256)
+    
+    Returns:
+        List of paths to generated tiles
+    """
+    from PIL import Image
+    
+    img = Image.open(image_path)
+    width, height = img.size
+    
+    # Resize if needed to ensure consistent size
+    if width != original_size or height != original_size:
+        img = img.resize((original_size, original_size), Image.LANCZOS)
+        width, height = original_size, original_size
+    
+    tile_paths = []
+    tiles_per_row = width // tile_size
+    tiles_per_col = height // tile_size
+    
+    base_name = image_path.stem
+    
+    for row in range(tiles_per_col):
+        for col in range(tiles_per_row):
+            left = col * tile_size
+            top = row * tile_size
+            right = left + tile_size
+            bottom = top + tile_size
+            
+            tile = img.crop((left, top, right, bottom))
+            
+            # Save with row/col indices in filename
+            tile_name = f"{base_name}_tile_{row}_{col}.png"
+            tile_path = output_dir / tile_name
+            tile.save(tile_path)
+            tile_paths.append(tile_path)
+    
+    return tile_paths
+
+
+def convert_mask_rgb_to_classes(mask_path, output_path):
+    """
+    Convert RGB damage mask to class indices.
+    
+    Color mapping:
+        - Black (0,0,0): Background/No Damage (class 0)
+        - Cyan (0,255,255): No Damage (class 0)
+        - Blue (0,0,255): Minor Damage (class 1)
+        - Yellow (255,255,0): Major Damage (class 2)
+        - Red (255,0,0): Destroyed (class 3)
+        - Light Gray (211,211,211): Unclassified -> No Damage (class 0)
+    
+    Args:
+        mask_path: Path to RGB mask image
+        output_path: Path to save class-indexed mask
+    
+    Returns:
+        Dictionary with class distribution statistics
+    """
+    from PIL import Image
+    import numpy as np
+    
+    # Load RGB mask
+    mask_rgb = np.array(Image.open(mask_path).convert('RGB'))
+    h, w = mask_rgb.shape[:2]
+    
+    # Initialize class mask
+    label_mask = np.zeros((h, w), dtype=np.uint8)
+    
+    # Color to class mapping
+    color_to_label = {
+        (0, 0, 0): 0,          # black: background
+        (0, 255, 255): 0,      # cyan: no damage
+        (0, 0, 255): 1,        # blue: minor
+        (255, 255, 0): 2,      # yellow: major
+        (255, 0, 0): 3,        # red: destroyed
+        (211, 211, 211): 0     # lightgray: unclassified -> no damage
+    }
+    
+    # Apply mapping with tolerance for slight color variations
+    for rgb, label in color_to_label.items():
+        # Exact match
+        mask = np.all(mask_rgb == rgb, axis=-1)
+        label_mask[mask] = label
+        
+        # Tolerance match (±10 in each channel)
+        tolerance = 10
+        mask_tol = (
+            (np.abs(mask_rgb[:,:,0] - rgb[0]) <= tolerance) &
+            (np.abs(mask_rgb[:,:,1] - rgb[1]) <= tolerance) &
+            (np.abs(mask_rgb[:,:,2] - rgb[2]) <= tolerance)
+        )
+        label_mask[mask_tol] = label
+    
+    # Save as grayscale PNG with pixel values 0-3
+    Image.fromarray(label_mask, mode='L').save(output_path)
+    
+    # Calculate statistics
+    unique, counts = np.unique(label_mask, return_counts=True)
+    class_dist = dict(zip(unique, counts))
+    
+    return class_dist
+
+
 def preprocess_xbd():
     """
-    Organize xBD dataset into required structure.
+    Organize and preprocess xBD dataset:
+    1. Copy images and labels to organized structure
+    2. Tile 256x256 images into 64x64 patches (4x4 grid)
+    3. Convert RGB masks to class-indexed masks
     
     Expected output structure:
         data/xbd/
         ├── train/
         │   ├── images/
-        │   │   ├── disaster-location_NNNNNNNN_pre_disaster.png
+        │   │   ├── disaster-location_NNNNNNNN_pre_disaster.png (256x256 original)
         │   │   └── disaster-location_NNNNNNNN_post_disaster.png
-        │   └── labels/
-        │       ├── disaster-location_NNNNNNNN_pre_disaster.json
-        │       └── disaster-location_NNNNNNNN_post_disaster.json
+        │   ├── images_tiled/
+        │   │   ├── disaster-location_NNNNNNNN_pre_disaster_tile_0_0.png (64x64)
+        │   │   └── ... (16 tiles per image)
+        │   ├── labels/
+        │   │   └── disaster-location_NNNNNNNN_pre_disaster.json
+        │   └── masks_class/
+        │       └── disaster-location_NNNNNNNN_post_disaster_mask.png (class indices)
         └── (tier1, tier3, hold, test with same structure)
     """
     print_section("Preprocessing xBD Dataset")
@@ -178,7 +296,9 @@ def preprocess_xbd():
     splits = ['train', 'tier1', 'tier3', 'hold', 'test']
     for split in splits:
         (XBD_PROCESSED / split / "images").mkdir(parents=True, exist_ok=True)
+        (XBD_PROCESSED / split / "images_tiled").mkdir(parents=True, exist_ok=True)
         (XBD_PROCESSED / split / "labels").mkdir(parents=True, exist_ok=True)
+        (XBD_PROCESSED / split / "masks_class").mkdir(parents=True, exist_ok=True)
     
     # Find xBD data structure
     print_info("Analyzing xBD directory structure...")
@@ -220,7 +340,10 @@ def preprocess_xbd():
     print_success(f"Found xBD root at: {xbd_root}")
     
     # Process each split
-    stats = defaultdict(lambda: {"images": 0, "labels": 0, "pre": 0, "post": 0})
+    stats = defaultdict(lambda: {
+        "images": 0, "labels": 0, "pre": 0, "post": 0,
+        "tiles": 0, "masks_converted": 0
+    })
     
     for split in splits:
         split_dir = xbd_root / split
@@ -238,18 +361,31 @@ def preprocess_xbd():
             print_warning(f"Images directory not found for {split}")
             continue
         
-        # Copy images (preserve original naming which should match pattern)
+        # Copy and process images
         image_files = list(images_dir.glob("*.png")) + list(images_dir.glob("*.jpg"))
-        for img_file in tqdm(image_files, desc=f"  Copying {split} images", leave=False):
+        
+        for img_file in tqdm(image_files, desc=f"  Processing {split} images", leave=False):
+            # Copy original image
             dest = XBD_PROCESSED / split / "images" / img_file.name
             shutil.copy2(img_file, dest)
             stats[split]["images"] += 1
             
             # Count pre/post for verification
-            if "_pre_disaster" in img_file.name:
+            is_pre = "_pre_disaster" in img_file.name
+            is_post = "_post_disaster" in img_file.name
+            
+            if is_pre:
                 stats[split]["pre"] += 1
-            elif "_post_disaster" in img_file.name:
+            elif is_post:
                 stats[split]["post"] += 1
+            
+            # Tile the image into 64x64 patches
+            try:
+                tile_output_dir = XBD_PROCESSED / split / "images_tiled"
+                tiles = tile_image(img_file, tile_output_dir, tile_size=64, original_size=256)
+                stats[split]["tiles"] += len(tiles)
+            except Exception as e:
+                print_warning(f"Failed to tile {img_file.name}: {e}")
         
         # Copy labels if they exist
         if labels_dir.exists():
@@ -258,6 +394,20 @@ def preprocess_xbd():
                 dest = XBD_PROCESSED / split / "labels" / label_file.name
                 shutil.copy2(label_file, dest)
                 stats[split]["labels"] += 1
+        
+        # Look for masks directory and convert RGB masks to class indices
+        masks_dir = split_dir / "masks"
+        if masks_dir.exists():
+            print_info(f"  Converting RGB masks to class indices for {split}...")
+            mask_files = list(masks_dir.glob("*.png")) + list(masks_dir.glob("*.jpg"))
+            
+            for mask_file in tqdm(mask_files, desc=f"  Converting {split} masks", leave=False):
+                try:
+                    output_path = XBD_PROCESSED / split / "masks_class" / mask_file.name
+                    class_dist = convert_mask_rgb_to_classes(mask_file, output_path)
+                    stats[split]["masks_converted"] += 1
+                except Exception as e:
+                    print_warning(f"Failed to convert mask {mask_file.name}: {e}")
     
     # Print statistics
     print_section("xBD Processing Statistics")
@@ -265,30 +415,36 @@ def preprocess_xbd():
     total_labels = 0
     total_pre = 0
     total_post = 0
+    total_tiles = 0
+    total_masks = 0
     
     for split in splits:
         images = stats[split]["images"]
         labels = stats[split]["labels"]
         pre = stats[split]["pre"]
         post = stats[split]["post"]
+        tiles = stats[split]["tiles"]
+        masks = stats[split]["masks_converted"]
         
         total_images += images
         total_labels += labels
         total_pre += pre
         total_post += post
+        total_tiles += tiles
+        total_masks += masks
         
         if images > 0 or labels > 0:
-            print(f"  {split:10s}: {images:6d} images ({pre:5d} pre, {post:5d} post), {labels:6d} labels")
+            print(f"  {split:10s}: {images:6d} images ({pre:5d} pre, {post:5d} post), "
+                  f"{tiles:6d} tiles, {labels:6d} labels, {masks:6d} masks")
     
-    print(f"\n  {'TOTAL':10s}: {total_images:6d} images ({total_pre:5d} pre, {total_post:5d} post), {total_labels:6d} labels")
-    
-    # Verify naming convention
-    if total_pre != total_post:
-        print_warning(f"Pre/post image count mismatch: {total_pre} pre vs {total_post} post")
-    else:
-        print_success(f"Pre/post images matched: {total_pre} pairs")
+    print(f"\n  {'TOTAL':10s}: {total_images:6d} images ({total_pre:5d} pre, {total_post:5d} post), "
+          f"{total_tiles:6d} tiles, {total_labels:6d} labels, {total_masks:6d} masks")
     
     print_success(f"xBD dataset organized at: {XBD_PROCESSED}")
+    print_info(f"  - Original images (256×256): {XBD_PROCESSED}/{{split}}/images/")
+    print_info(f"  - Tiled images (64×64): {XBD_PROCESSED}/{{split}}/images_tiled/")
+    print_info(f"  - Class masks: {XBD_PROCESSED}/{{split}}/masks_class/")
+    
     return True
 
 ################################################################################
