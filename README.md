@@ -240,9 +240,9 @@ python reproduce_disastergan_xbd.py
 ```
 
 **Configuration in script:**
-- Epochs: 10 (increase for better results)
+- Epochs: 7 (increase for better results)
 - Batch size: 16
-- Learning rate: 2e-4
+- Learning rate: 1e-4
 - Image size: 256×256
 - Disaster types: volcano, fire, tornado, tsunami, flooding, earthquake, hurricane
 
@@ -300,7 +300,7 @@ python 02_finetune_half_stage.py
 - Loads baseline checkpoint
 - Freezes encoder layers
 - Fine-tunes decoder only on BRIGHT data (stratified by LIC/MIC/HIC)
-- Reduced epochs: 10
+- Reduced epochs: 3
 - Reduced learning rate: 1e-4
 
 **Output:**
