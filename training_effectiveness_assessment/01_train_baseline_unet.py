@@ -18,7 +18,7 @@ from utils.metrics import calculate_metrics
 # Config
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = 16
-EPOCHS = 20
+EPOCHS = 7
 LR = 1e-3
 WEIGHT_DECAY = 1e-5
 SEED = 42
