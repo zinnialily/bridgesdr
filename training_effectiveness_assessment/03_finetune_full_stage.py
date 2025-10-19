@@ -53,7 +53,7 @@ for region in STRATA:
     print(f"\n=== Full Fine-Tuning for {region} ===")
     
     # Dataset
-    BRIGHT_ROOT = f"path/to/BRIGHT_{region}_pseudo"
+    BRIGHT_ROOT = f"path/to/BRIGHT_{region}"
     train_loader, val_loader = prepare_dataloaders(BRIGHT_ROOT, [], 0.7, BATCH_SIZE)
 
     # Load half-finetuned model
