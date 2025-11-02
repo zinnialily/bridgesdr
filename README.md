@@ -235,45 +235,33 @@ python reproduction_scripts/02_preprocess_data.py --verify
 
 ### Step 3: Synthetic Imagery Quality Assessment
 
-**Train DisasterGAN:**
+#### Important: Pre-Trained Checkpoints Available
+
+**DisasterGAN checkpoints are already provided in the repository:**
+- `checkpoints/disastergan/disastergan_generator_final.pth`
+- `checkpoints/disastergan/disastergan_discriminator_final.pth`
+
+**Training is OPTIONAL.** You can skip directly to image generation if you want to use the pre-trained models.
+
+If using pre-trained checkpoints (reccomended):
 ```bash
-cd reproduction_scripts/synthetic_imagery_quality_assessment
-python reproduce_disastergan_xbd.py
+cd synthetic_imagery_quality_assessment
+
+# Generate synthetic images
+python 04_generate_synthetic_images.py
+
+# Convert to SAR
+python 05_convert_optical_to_sar.py
+
+# Generate damage masks
+python 06_generate_damage_masks.py
+
+# Evaluate quality
+python 07_evaluate_quality_metrics.py
 ```
-
-**Configuration in script:**
-- Epochs: 7 (increase for better results)
-- Batch size: 16
-- Learning rate: 1e-4
-- Image size: 256×256
-- Disaster types: volcano, fire, tornado, tsunami, flooding, earthquake, hurricane
-
-**Output:**
-- `saved_models/G_epoch_*.pth` - Generator checkpoints
-- `saved_models/D_epoch_*.pth` - Discriminator checkpoints
-- `samples/` - Generated sample images
-- `plots/` - Training loss curves
-
-**Evaluate Synthetic Quality:**
-```bash
-python evaluation.py \
-    --model ./saved_models/G_final.pth \
-    --pre-dir ../../data/bright/lic/images \
-    --post-dir ../../data/bright/lic/images \
-    --out ./results/lic_multiclass \
-    --strata LIC \
-    --mode multiclass
-```
-
-**Evaluation Modes:**
-- `binary`: Simple damage/no-damage classification
-- `multiclass`: 4-class damage assessment (none/minor/major/destroyed)
-
-**Output:**
-- JSON files with per-image metrics (IoU, Dice, Precision, Recall)
-- Summary statistics per disaster type
-- Visualization images comparing real vs synthetic
-
+If training from scratch:
+- Add python _03_train_disastergan.py_ at the beginning
+- Follow the same steps above for generation and evaluation
 ### Step 4: Training Effectiveness Assessment
 
 **Train Baseline U-Net (Stage 0):**
