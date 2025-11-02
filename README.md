@@ -101,41 +101,43 @@ for all-weather disaster response.
 
 ```
 bridgesdr/
-├── data/                                   
-│   ├── xbd_raw/                          
-│   ├── bright_raw/                      
-│   ├── xbd/                              
+├── data/
+│   ├── xbd_raw/
+│   ├── bright_raw/
+│   ├── xbd/
 │   │   ├── train/images/
 │   │   ├── train/labels/
 │   │   ├── test/images/
 │   │   ├── test/labels/
-│   │   ├── tier1/, tier3/, hold/         
-│   └── bright/                      
+│   │   ├── tier1/, tier3/, hold/
+│   └── bright/
 │       ├── lic/images/, lic/masks/
 │       ├── mic/images/, mic/masks/
 │       └── hic/images/, hic/masks/
 │
 ├── reproduction_scripts/
-│ ├── 01_download_datasets.sh # Downloads xBD and BRIGHT
-│ ├── 02_preprocess_data.py # Organizes data into standard format
-│ │
-│ ├── synthetic_imagery_quality_assessment/ # Synthetic generation & validation
-│ │ ├── 03_train_disastergan.py
-│ │ ├── 04_generate_synthetic_images.py
-│ │ ├── 05_convert_optical_to_sar.py
-│ │ ├── 06_generate_damage_masks.py
-│ │ └── 07_evaluate_quality_metrics.py
-│ │
-│ └── training_effectiveness_assessment/ # Fine-tuning and evaluation pipeline
-│ ├── 08_train_baseline_unet.py
-│ ├── 09_finetune_half_stage.py
-│ ├── 10_finetune_full_stage.py
-│ └── 11_evaluation.py
+│   ├── 00_* (optional setup)
+│   ├── 01_download_datasets.sh
+│   └── 02_preprocess_data.py
+│
+├── synthetic_imagery_quality_assessment/
+│   ├── 03_train_disastergan.py
+│   ├── 04_generate_synthetic_images.py
+│   ├── 05_convert_optical_to_sar.py
+│   ├── 06_generate_damage_masks.py
+│   └── 07_evaluate_quality_metrics.py
+│
+├── training_effectiveness_assessment/
+│   ├── 08_train_baseline_unet.py
+│   ├── 09_finetune_half_stage.py
+│   ├── 10_finetune_full_stage.py
+│   └── 11_evaluation.py
 │
 ├── checkpoints/
 ├── ATTRIBUTION.md
 ├── requirements.txt
-└── README.md # This file
+└── README.md
+
 ```
 
 ---
