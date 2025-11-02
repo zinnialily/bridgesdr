@@ -56,7 +56,7 @@ class Config:
     tile_size = 64          # Use 64×64 tiles from preprocessing
     original_size = 256     # Original image size before tiling
     batch_size = 16
-    epochs = 10
+    epochs = 7
     lr = 2e-4
     betas = (0.5, 0.999)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
