@@ -474,27 +474,6 @@ See `requirements.txt` for complete list. Key dependencies:
 }
 ```
 
-### Datasets
-
-**xBD:**
-```bibtex
-@inproceedings{gupta2019xbd,
-  title={xBD: A dataset for assessing building damage from satellite imagery},
-  author={Gupta, Vishal and others},
-  booktitle={CVPR Workshops},
-  year={2019}
-}
-```
-
-**BRIGHT:**
-```bibtex
-@article{chen2025bright,
-  title={BRIGHT: A globally distributed multimodal building damage assessment dataset},
-  author={Chen, Hongruixuan and others},
-  year={2025}
-}
-```
-
 ### Code Attribution
 
 This implementation is inspired by the DisasterGAN Kaggle kernel:
