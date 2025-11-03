@@ -265,8 +265,8 @@ If training from scratch:
 
 ---
 ### Step 4: Training Effectiveness Assessment
-####**Option A: Skip Training (Use Existing Checkpoints)**
-There are alread trained model checkpoints in checkpoints/unet_study2/, so you can skip directly to evaluation.
+#### Option A: Skip Training (Use Existing Checkpoints)
+There are already trained model checkpoints in checkpoints/unet_study2/, so you can skip directly to evaluation.
 Evaluate Each Checkpoint:
 Run 11_evaluation.py separately for each checkpoint by modifying the CHECKPOINT variable in the script:
 bash
@@ -299,13 +299,11 @@ python 11_evaluation.py
 # Edit line 14: CHECKPOINT = "checkpoints/unet_study2/hic_full_finetuned_unet.pth"
 python 11_evaluation.py
 ```
-####**Option B: Train Models from Scratch (Optional)**
+#### Option B: Train Models from Scratch (Optional)
 If you need to train the models yourself, follow these steps. Note: The training scripts currently output to checkpoints/study2/, so you'll need to either:
-
 Modify CHECKPOINT_DIR in scripts 08, 09, and 10 to "checkpoints/unet_study2/", OR
 Move the generated checkpoints after training
 
-_Stage 0: Train Baseline U-Net_
 bash
 ```cd reproduction_scripts/training_effectiveness_assessment
 python 08_train_baseline_unet.py
@@ -315,6 +313,7 @@ python 10_finetune_full_stage.py
 After training (or if using existing checkpoints), evaluate each model using:
 bash ```python 11_evaluation.py```
 Remember to modify the CHECKPOINT variable in the script for each model you want to evaluate.
+
 ---
 
 ## Methodology
