@@ -87,6 +87,12 @@ In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recogni
 
 **DOI:** https://zenodo.org/records/15385983
 
+**Citation:**
+```
+Chen, H., Song, J., Dietrich, O., Broni-Bediako, C., Xuan, W., Wang, J., ... & Yokoya, N. (2025). 
+BRIGHT: A globally distributed multimodal building damage assessment dataset with very-high-resolution 
+for all-weather disaster response.
+```
 ### 3. Sentinel-1/2 Image Pairs Dataset
 
 **Description:** Paired SAR (Sentinel-1) and optical (Sentinel-2) satellite imagery across diverse terrain types for cross-modal analysis.
@@ -115,14 +121,6 @@ In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recogni
 Tiwari, R. K., Gupta, R. P., & Arora, M. K. (2022). 
 Sentinel-1 and Sentinel-2 Data for Land Use/Land Cover Mapping. 
 Technical University of Munich, Mediatum.
-```
-
-
-**Citation:**
-```
-Chen, H., Song, J., Dietrich, O., Broni-Bediako, C., Xuan, W., Wang, J., ... & Yokoya, N. (2025). 
-BRIGHT: A globally distributed multimodal building damage assessment dataset with very-high-resolution 
-for all-weather disaster response.
 ```
 
 ---
