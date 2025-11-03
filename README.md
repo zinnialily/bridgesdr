@@ -260,60 +260,61 @@ python 06_generate_damage_masks.py
 python 07_evaluate_quality_metrics.py
 ```
 If training from scratch:
-- Add python _03_train_disastergan.py_ at the beginning
+- Add python ```bash 03_train_disastergan.py``` at the beginning
 - Follow the same steps above for generation and evaluation
+
+---
 ### Step 4: Training Effectiveness Assessment
+####**Option A: Skip Training (Use Existing Checkpoints)**
+There are alread trained model checkpoints in checkpoints/unet_study2/, so you can skip directly to evaluation.
+Evaluate Each Checkpoint:
+Run 11_evaluation.py separately for each checkpoint by modifying the CHECKPOINT variable in the script:
+bash
+```cd reproduction_scripts/training_effectiveness_assessment
+# Evaluate baseline model
+# Edit line 14 in 11_evaluation.py: CHECKPOINT = "checkpoints/unet_study2/baseline_unet.pth"
+python 11_evaluation.py
 
-**Train Baseline U-Net (Stage 0):**
-```bash
-cd reproduction_scripts/training_effectiveness_assessment
-python 01_train_baseline_unet.py
+# Evaluate LIC half-finetuned
+# Edit line 14: CHECKPOINT = "checkpoints/unet_study2/lic_half_finetuned_unet.pth"
+python 11_evaluation.py
+
+# Evaluate LIC full-finetuned
+# Edit line 14: CHECKPOINT = "checkpoints/unet_study2/lic_full_finetuned_unet.pth"
+python 11_evaluation.py
+
+# Evaluate MIC half-finetuned
+# Edit line 14: CHECKPOINT = "checkpoints/unet_study2/mic_half_finetuned_unet.pth"
+python 11_evaluation.py
+
+# Evaluate MIC full-finetuned
+# Edit line 14: CHECKPOINT = "checkpoints/unet_study2/mic_full_finetuned_unet.pth"
+python 11_evaluation.py
+
+# Evaluate HIC half-finetuned
+# Edit line 14: CHECKPOINT = "checkpoints/unet_study2/hic_half_finetuned_unet.pth"
+python 11_evaluation.py
+
+# Evaluate HIC full-finetuned
+# Edit line 14: CHECKPOINT = "checkpoints/unet_study2/hic_full_finetuned_unet.pth"
+python 11_evaluation.py
 ```
+####**Option B: Train Models from Scratch (Optional)**
+If you need to train the models yourself, follow these steps. Note: The training scripts currently output to checkpoints/study2/, so you'll need to either:
 
-**Configuration:**
-- Training on xBD only
-- Epochs: 7 (configurable)
-- Batch size: 16
-- Learning rate: 1e-3
-- Class weights: [0.1, 1.0, 1.0, 1.0] (downweight no-damage class)
+Modify CHECKPOINT_DIR in scripts 08, 09, and 10 to "checkpoints/unet_study2/", OR
+Move the generated checkpoints after training
 
-**Output:**
-- `checkpoints/study2/baseline_unet_best.pth`
-- `checkpoints/study2/baseline_unet_final.pth`
-
-**Stage 1: Half Fine-Tuning (Decoder Only):**
-```bash
-python 02_finetune_half_stage.py
+_Stage 0: Train Baseline U-Net_
+bash
+```cd reproduction_scripts/training_effectiveness_assessment
+python 08_train_baseline_unet.py
+python 09_finetune_half_stage.py
+python 10_finetune_full_stage.py
 ```
-
-**What this does:**
-- Loads baseline checkpoint
-- Freezes encoder layers
-- Fine-tunes decoder only on BRIGHT data (stratified by LIC/MIC/HIC)
-- Reduced epochs: 3
-- Reduced learning rate: 1e-4
-
-**Output:**
-- `checkpoints/study2/lic_half_finetuned_unet.pth`
-- `checkpoints/study2/mic_half_finetuned_unet.pth`
-- `checkpoints/study2/hic_half_finetuned_unet.pth`
-
-**Stage 2: Full Fine-Tuning:**
-```bash
-python 03_finetune_full_stage.py
-```
-
-**What this does:**
-- Loads half-finetuned checkpoint
-- Unfreezes all layers
-- Full network fine-tuning on BRIGHT data
-- Epochs: 3 (configurable)
-
-**Output:**
-- `checkpoints/study2/lic_full_finetuned_unet.pth`
-- `checkpoints/study2/mic_full_finetuned_unet.pth`
-- `checkpoints/study2/hic_full_finetuned_unet.pth`
-
+After training (or if using existing checkpoints), evaluate each model using:
+bash ```python 11_evaluation.py```
+Remember to modify the CHECKPOINT variable in the script for each model you want to evaluate.
 ---
 
 ## Methodology
