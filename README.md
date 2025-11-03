@@ -36,7 +36,7 @@ This work provides the first comprehensive evaluation of synthetic disaster imag
 
 ## Datasets
 
-This research utilizes two complementary disaster imagery datasets:
+This research utilizes three complementary disaster imagery datasets:
 
 ### 1. xBD Dataset (xView2)
 
@@ -86,6 +86,37 @@ In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recogni
 - **HIC (High-Income Countries):** Noto (Italy), La Palma (Spain), Hawaii (USA)
 
 **DOI:** https://zenodo.org/records/15385983
+
+### 3. Sentinel-1/2 Image Pairs Dataset
+
+**Description:** Paired SAR (Sentinel-1) and optical (Sentinel-2) satellite imagery across diverse terrain types for cross-modal analysis.
+
+**Usage in this project:**
+- **Appendix Testing:** Validation of the simplified SAR-to-optical approximation methodology
+- Evaluates conversion quality across four terrain types: urban, agricultural, grassland, and barren land
+
+**Image Modalities:**
+- Sentinel-1 SAR imagery (S1 - C-band synthetic aperture radar)
+- Sentinel-2 optical imagery (S2 - multispectral optical)
+- Organized by terrain type for systematic evaluation
+
+**Terrain Types:**
+- Urban
+- Agricultural
+- Grassland
+- Barren land
+
+**Kaggle Download:** https://www.kaggle.com/datasets/requiemonk/sentinel12-image-pairs-segregated-by-terrain/data
+
+**Original Source:** https://mediatum.ub.tum.de/1436631
+
+**Citation:**
+```
+Tiwari, R. K., Gupta, R. P., & Arora, M. K. (2022). 
+Sentinel-1 and Sentinel-2 Data for Land Use/Land Cover Mapping. 
+Technical University of Munich, Mediatum.
+```
+
 
 **Citation:**
 ```
