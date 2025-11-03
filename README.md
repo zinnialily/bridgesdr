@@ -161,6 +161,8 @@ bridgesdr/
 │   ├── 10_finetune_full_stage.py
 │   └── 11_evaluation.py
 │
+├── appendix_testing/
+│   ├── 12_sar_to_optical_validation.py
 ├── checkpoints/
 ├── ATTRIBUTION.md
 ├── requirements.txt
@@ -371,13 +373,12 @@ BRIGHT dataset events are classified by World Bank GNI per capita:
 **Stage 1 (Half Fine-Tuning):** 
 - Freeze encoder layers
 - Fine-tune decoder only
-- Reduced epochs (10) and learning rate (1e-4)
 - Minimal resource investment scenario
 
 **Stage 2 (Full Fine-Tuning):**
 - Unfreeze all layers
 - Full network fine-tuning
-- Complete epochs (20) with learning rate decay
+- Epoches with learning rate decay
 - Comprehensive adaptation scenario
 
 ---
