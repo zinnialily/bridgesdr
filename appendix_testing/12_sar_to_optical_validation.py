@@ -92,12 +92,12 @@ def setup_kaggle_credentials():
         sys.exit(1)
     
     kaggle_json.chmod(0o600)
-    print("✓ Kaggle credentials found")
+    print("  Kaggle credentials found")
 
 
 def download_sentinel_dataset(config: Config, force: bool = False):
     if config.SENTINEL_ROOT.exists() and not force:
-        print(f"\n✓ Dataset already exists at {config.SENTINEL_ROOT}")
+        print(f"\n  Dataset already exists at {config.SENTINEL_ROOT}")
         return True
     
     try:
@@ -118,7 +118,7 @@ def download_sentinel_dataset(config: Config, force: bool = False):
             unzip=True,
             quiet=False
         )
-        print("\n✓ Dataset downloaded successfully")
+        print("\n  Dataset downloaded successfully")
         return True
     except Exception as e:
         print(f"\n✗ Error: {e}")
@@ -134,7 +134,7 @@ def verify_dataset_structure(config: Config) -> bool:
         print(f"\n✗ Dataset root not found: {config.SENTINEL_ROOT}")
         return False
     
-    print(f"\n✓ Dataset root found: {config.SENTINEL_ROOT}")
+    print(f"\n  Dataset root found: {config.SENTINEL_ROOT}")
     
     all_valid = True
     for terrain_folder in config.TERRAIN_MAPPING.keys():
@@ -149,7 +149,7 @@ def verify_dataset_structure(config: Config) -> bool:
         
         s1_images = list(s1_path.glob("*"))
         s2_images = list(s2_path.glob("*"))
-        print(f"✓ {terrain_folder:12} - S1: {len(s1_images):4d}, S2: {len(s2_images):4d}")
+        print(f"  {terrain_folder:12} - S1: {len(s1_images):4d}, S2: {len(s2_images):4d}")
     
     return all_valid
 
@@ -265,7 +265,7 @@ def evaluate_terrain_type(config: Config, terrain_folder: str, terrain_name: str
             metrics['terrain'] = terrain_name
             results.append(metrics)
     
-    print(f"  ✓ Evaluated {len(results)} pairs")
+    print(f"    Evaluated {len(results)} pairs")
     return pd.DataFrame(results)
 
 
@@ -286,7 +286,7 @@ def evaluate_all_terrains(config: Config) -> pd.DataFrame:
     results_df = pd.concat(all_results, ignore_index=True)
     output_path = config.RESULTS_DIR / "raw_results.csv"
     results_df.to_csv(output_path, index=False)
-    print(f"\n✓ Raw results: {output_path}")
+    print(f"\n  Raw results: {output_path}")
     
     return results_df
 
