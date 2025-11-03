@@ -1,4 +1,3 @@
-**Link to the full paper:** [https://dx.doi.org/10.2139/ssrn.5385441](https://dx.doi.org/10.2139/ssrn.5385441)
 # Bridging the Post-Disaster Imagery Gap: Leveraging Synthetic Data for Disaster Response across Economic Spectra
 
 [![GitHub](https://img.shields.io/badge/GitHub-Repository-blue)](https://github.com/zinnialily/bridgesdr)
