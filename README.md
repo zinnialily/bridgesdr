@@ -447,9 +447,9 @@ See `ATTRIBUTION.md` for complete attribution details.
 This project is licensed under the MIT License. See `LICENSE` file for details.
 
 **Dataset Licenses:**
-- xBD: See https://xview2.org/dataset for terms of use
-- BRIGHT: See Zenodo record for license information
-
+- **xBD** — [Terms of Use](https://xview2.org/dataset)
+- **BRIGHT** — See Zenodo record for license information
+- **Sentinel-1 & 2 Image Pairs** — [Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/)
 ---
 
 ## Acknowledgments
