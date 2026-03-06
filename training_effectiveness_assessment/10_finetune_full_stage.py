@@ -1,120 +1,130 @@
 """
-Full Fine-Tuning (Stage 2) on BRIGHT pseudo-data:
-- Loads half-finetuned checkpoint
-- Unfreezes all layers
-- Fine-tunes entire network
-- Saves per-stratum model
+10_finetune_full_stage.py  —  Study 2: Stage 2 Fine-Tuning (all 3 models)
+=========================================================================
+Stage 2: ALL layers trainable — loads Stage 1 checkpoints.
+
+Applies to U-Net, SegFormer-B2, and ChangeFormer.
+
+Cross-disaster augmentation (20% from other strata) continues from Stage 1.
+
+Hyperparameters:
+  Optimizer : AdamW  lr=1e-4  weight_decay=1e-4
+  Scheduler : CosineAnnealingLR  T_max=10
+  Epochs    : 10
+  Batch     : 8 (GPU) / 4 (CPU)
+  Seed      : 42
+
+Inputs  : checkpoints/<model>_stage1_<income>.pth
+Outputs : checkpoints/<model>_stage2_<income>.pth
+Results : results/study2/finetune_stage2/stage2_results.json
 """
 
-import os
+import sys, json
+from pathlib import Path
+SCRIPT_DIR   = Path(__file__).parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(SCRIPT_DIR))
+
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from models.unet import UNet
-from utils.dataset import prepare_dataloaders
-from utils.metrics import calculate_metrics
+from torch.utils.data import DataLoader
 
-# ======================
-# Config
-# ======================
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-BATCH_SIZE = 16
-EPOCHS = 3
-LR = 1e-4
-WEIGHT_DECAY = 1e-5
-SEED = 42
-CHECKPOINT_DIR = "checkpoints/study2/"
-USE_EXISTING_CHECKPOINT = True
+from _08_shared import (
+    BRIGHTDataset, BRIGHTBitemporalDataset, run_training,
+    set_seed, get_device, get_batch_size,
+    FINETUNE_LR, FINETUNE_EPOCHS, WEIGHT_DECAY, CLASS_WEIGHTS, SEED,
+    INCOME_LEVELS, load_manifest, get_augmented_train_records,
+)
+from _model_registry import load_model, MODEL_NAMES
 
-# Strata
-STRATA = ["LIC", "MIC", "HIC"]
-HALF_PATHS = {
-    "LIC": os.path.join(CHECKPOINT_DIR, "lic_half_finetuned_unet.pth"),
-    "MIC": os.path.join(CHECKPOINT_DIR, "mic_half_finetuned_unet.pth"),
-    "HIC": os.path.join(CHECKPOINT_DIR, "hic_half_finetuned_unet.pth"),
-}
-FULL_PATHS = {
-    "LIC": os.path.join(CHECKPOINT_DIR, "lic_full_finetuned_unet.pth"),
-    "MIC": os.path.join(CHECKPOINT_DIR, "mic_full_finetuned_unet.pth"),
-    "HIC": os.path.join(CHECKPOINT_DIR, "hic_full_finetuned_unet.pth"),
-}
+CHECKPOINT_DIR = PROJECT_ROOT / "checkpoints"
+RESULTS_DIR    = PROJECT_ROOT / "results" / "study2" / "finetune_stage2"
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-# ======================
-# Reproducibility
-# ======================
-torch.manual_seed(SEED)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(SEED)
 
-# ======================
-# Full Fine-Tuning Loop
-# ======================
-for region in STRATA:
-    print(f"\n=== Full Fine-Tuning for {region} ===")
-    
-    # Dataset
-    BRIGHT_ROOT = f"path/to/BRIGHT_{region}"
-    train_loader, val_loader = prepare_dataloaders(BRIGHT_ROOT, [], 0.7, BATCH_SIZE)
+def main():
+    set_seed(SEED)
+    device     = get_device()
+    batch_size = get_batch_size()
 
-    # Load half-finetuned model
-    model = UNet(in_channels=4, out_classes=4).to(DEVICE)
-    model.load_state_dict(torch.load(HALF_PATHS[region], map_location=DEVICE))
+    print("=" * 60)
+    print("10  —  Stage 2 Fine-Tuning: All Layers  (all 3 models)")
+    print("=" * 60)
+    print(f"Models   : {MODEL_NAMES}")
+    print(f"LR       : {FINETUNE_LR}")
+    print(f"Epochs   : {FINETUNE_EPOCHS}")
 
-    # Unfreeze all layers
-    for param in model.parameters():
-        param.requires_grad = True
+    all_results = {}
 
-    # Loss, optimizer, scheduler
-    class_weights = torch.tensor([0.1, 1.0, 1.0, 1.0]).to(DEVICE)  # 10% for 'no damage'
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
-    optimizer = optim.Adam(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', patience=5, factor=0.5
-    )
+    for model_name in MODEL_NAMES:
+        all_results[model_name] = {}
+        bitemporal = (model_name == "changeformer")
+        DS = BRIGHTBitemporalDataset if bitemporal else BRIGHTDataset
 
-    checkpoint_path = FULL_PATHS[region]
+        for income in INCOME_LEVELS:
+            print(f"\n{'─'*50}")
+            print(f"Model: {model_name.upper()}  |  Stratum: {income.upper()}")
+            print(f"{'─'*50}")
 
-    # Load existing checkpoint if present
-    if USE_EXISTING_CHECKPOINT and os.path.exists(checkpoint_path):
-        print(f"Loading existing full-finetuned checkpoint: {checkpoint_path}")
-        model.load_state_dict(torch.load(checkpoint_path, map_location=DEVICE))
-        continue
+            # Load Stage 1 checkpoint (fallback to baseline if Stage 1 missing)
+            ckpt = CHECKPOINT_DIR / f"{model_name}_stage1_{income}.pth"
+            if not ckpt.exists():
+                ckpt = CHECKPOINT_DIR / f"{model_name}_baseline_{income}.pth"
+                if ckpt.exists():
+                    print(f"  [info] Stage 1 not found; loading baseline instead")
+                else:
+                    print(f"  [skip] No checkpoint found for {model_name}/{income}")
+                    continue
 
-    # Training
-    best_iou = 0
-    for epoch in range(EPOCHS):
-        model.train()
-        running_loss = 0.0
-        for inputs, masks in train_loader:
-            inputs, masks = inputs.to(DEVICE), masks.to(DEVICE)
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, masks)
-            loss.backward()
-            optimizer.step()
-            running_loss += loss.item()
-        avg_loss = running_loss / len(train_loader)
+            train_recs = get_augmented_train_records(income)
+            val_recs   = load_manifest(income, "val")
 
-        # Validation
-        model.eval()
-        val_iou, val_dice = 0, 0
-        with torch.no_grad():
-            for inputs, masks in val_loader:
-                inputs, masks = inputs.to(DEVICE), masks.to(DEVICE)
-                preds = torch.argmax(model(inputs), dim=1)
-                iou, dice, _, _ = calculate_metrics(preds, masks)
-                val_iou += iou
-                val_dice += dice
-        val_iou /= len(val_loader)
-        val_dice /= len(val_loader)
-        scheduler.step(val_iou)
+            if not train_recs:
+                print(f"  [skip] No training data for {income}")
+                continue
 
-        print(f"{region} - Epoch {epoch+1}: Avg Loss={avg_loss:.4f}, Val IoU={val_iou:.4f}, Dice={val_dice:.4f}")
+            train_ds = DS(train_recs, augment=True)
+            val_ds   = DS(val_recs,   augment=False)
 
-        # Save best model
-        if val_iou > best_iou:
-            best_iou = val_iou
-            torch.save(model.state_dict(), checkpoint_path)
-            print(f"Saved improved model at epoch {epoch+1} to {checkpoint_path}")
+            train_loader = DataLoader(train_ds, batch_size=batch_size,
+                                      shuffle=True,  num_workers=2, pin_memory=True)
+            val_loader   = DataLoader(val_ds,   batch_size=batch_size,
+                                      shuffle=False, num_workers=2, pin_memory=True)
 
-    print(f"Finished Full Fine-Tuning for {region}")
+            # Load Stage 1 model
+            model = load_model(model_name).to(device)
+            state = torch.load(ckpt, map_location=device)
+            model.load_state_dict(state.get("model_state_dict", state))
+
+            # Unfreeze ALL parameters
+            for param in model.parameters():
+                param.requires_grad = True
+
+            criterion = nn.CrossEntropyLoss(weight=CLASS_WEIGHTS.to(device))
+            optimizer = torch.optim.AdamW(model.parameters(), lr=FINETUNE_LR,
+                                          weight_decay=WEIGHT_DECAY)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=FINETUNE_EPOCHS)
+
+            save_path = CHECKPOINT_DIR / f"{model_name}_stage2_{income}.pth"
+
+            best = run_training(
+                model, train_loader, val_loader,
+                optimizer, scheduler, criterion,
+                FINETUNE_EPOCHS, device, save_path,
+                model_name=f"{model_name}[{income.upper()}] Stage2",
+                bitemporal=bitemporal,
+            )
+
+            all_results[model_name][income] = best
+            print(f"  Best mIoU: {best.get('mean_iou', 0):.4f}")
+
+    out_path = RESULTS_DIR / "stage2_results.json"
+    with open(out_path, "w") as fh:
+        json.dump(all_results, fh, indent=2)
+    print(f"\nAll results → {out_path}")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()

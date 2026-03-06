@@ -1,28 +1,25 @@
 """
-08_train_baseline_unet.py  —  Study 2: Baseline U-Net on BRIGHT (all strata)
-=============================================================================
-Reviewer 1 Concerns addressed:
-  • Concern 8  : Explicit training hyperparameters documented here
-  • Concern 9  : BRIGHT ONLY — xBD is NOT used for Study 2
-  • Concern 6  : This is the legacy baseline; SegFormer + ChangeFormer in 08b/08c
+08b_train_segformer.py  —  Study 2: Baseline SegFormer-B2 on BRIGHT
+=====================================================================
+Addresses Reviewer 1 Concern 6: "Only a single baseline (U-Net) is evaluated."
 
-Architecture : U-Net  (4-channel input: pre-RGB + post-SAR)
+Architecture : SegFormer-B2  (HuggingFace transformers, pretrained nvidia/mit-b2)
 Input        : 4 × H × W  [R, G, B, SAR]
-Output       : N_CLASSES × H × W  (argmax → {0,1,2,3})
-Labels       : BRIGHT expert labels from Copernicus EMS / UNOSAT / FEMA
+               First patch-embedding conv extended from 3→4 channels
+               (SAR weight initialised as mean of RGB weights for warm start)
+Output       : N_CLASSES × H × W
 
-Hyperparameters (Reviewer 1, Concern 8):
+Hyperparameters (same protocol as U-Net for fair comparison):
   Loss      : CrossEntropyLoss  weights=[0.1, 1.0, 1.5, 2.0]
-  Optimizer : AdamW  lr=1e-3  weight_decay=1e-4
+  Optimizer : AdamW  lr=6e-5  weight_decay=1e-4   (lower LR for pretrained Transformer)
   Scheduler : CosineAnnealingLR  T_max=20
   Epochs    : 20
   Batch     : 8 (GPU) / 4 (CPU)
-  Augment   : HFlip + VFlip + Rotation±30° + ColorJitter (optical only)
   Seed      : 42
 
 Outputs:
-  checkpoints/unet_baseline_<income>.pth   (one per stratum)
-  results/study2/baseline/unet_baseline_results.json
+  checkpoints/segformer_baseline_<income>.pth
+  results/study2/baseline/segformer_baseline_results.json
 """
 
 import sys, json
@@ -36,13 +33,14 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from _08_shared import (
-    BRIGHTDataset, run_training, compute_metrics,
+    BRIGHTDataset, run_training,
     set_seed, get_device, get_batch_size,
-    BASELINE_LR, BASELINE_EPOCHS, WEIGHT_DECAY, CLASS_WEIGHTS, SEED,
+    BASELINE_EPOCHS, WEIGHT_DECAY, CLASS_WEIGHTS, SEED,
     INCOME_LEVELS, load_manifest,
 )
 from _model_registry import load_model
 
+SEGFORMER_LR   = 6e-5      # lower than U-Net: pre-trained transformer
 CHECKPOINT_DIR = PROJECT_ROOT / "checkpoints"
 RESULTS_DIR    = PROJECT_ROOT / "results" / "study2" / "baseline"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -55,12 +53,12 @@ def main():
     batch_size = get_batch_size()
 
     print("=" * 60)
-    print("08  —  Baseline U-Net Training  (BRIGHT only, Study 2)")
+    print("08b  —  Baseline SegFormer-B2 Training  (BRIGHT only, Study 2)")
     print("=" * 60)
     print(f"Device     : {device}")
     print(f"Batch size : {batch_size}")
     print(f"Epochs     : {BASELINE_EPOCHS}")
-    print(f"LR (AdamW) : {BASELINE_LR}")
+    print(f"LR (AdamW) : {SEGFORMER_LR}  (lower for pretrained Transformer)")
     print(f"Loss wts   : {CLASS_WEIGHTS.tolist()}")
 
     all_results = {}
@@ -85,27 +83,27 @@ def main():
         val_loader   = DataLoader(val_ds,   batch_size=batch_size,
                                   shuffle=False, num_workers=2, pin_memory=True)
 
-        model     = load_model("unet").to(device)
+        model     = load_model("segformer").to(device)
         criterion = nn.CrossEntropyLoss(weight=CLASS_WEIGHTS.to(device))
         optimizer = torch.optim.AdamW(model.parameters(),
-                                      lr=BASELINE_LR, weight_decay=WEIGHT_DECAY)
+                                      lr=SEGFORMER_LR, weight_decay=WEIGHT_DECAY)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=BASELINE_EPOCHS)
 
-        save_path = CHECKPOINT_DIR / f"unet_baseline_{income}.pth"
+        save_path = CHECKPOINT_DIR / f"segformer_baseline_{income}.pth"
 
         best = run_training(
             model, train_loader, val_loader,
             optimizer, scheduler, criterion,
             BASELINE_EPOCHS, device, save_path,
-            model_name=f"U-Net[{income.upper()}]",
+            model_name=f"SegFormer[{income.upper()}]",
             bitemporal=False,
         )
 
         all_results[income] = best
         print(f"  Best mIoU ({income.upper()}): {best.get('mean_iou', 0):.4f}")
 
-    out_path = RESULTS_DIR / "unet_baseline_results.json"
+    out_path = RESULTS_DIR / "segformer_baseline_results.json"
     with open(out_path, "w") as fh:
         json.dump(all_results, fh, indent=2)
     print(f"\nAll results → {out_path}")

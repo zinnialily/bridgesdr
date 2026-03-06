@@ -1,860 +1,395 @@
-#!/usr/bin/env python3
 """
-Dataset Preprocessing Script for xBD and BRIGHT
-xBD Structure:
-    data/xbd/{train|tier1|tier3|hold|test}/images/*.png
-    data/xbd/{train|tier1|tier3|hold|test}/labels/*.json
-    
-BRIGHT Structure:
-    data/bright/{lic|mic|hic}/images/*_pre_disaster.{png|tif}
-    data/bright/{lic|mic|hic}/images/*_post_disaster.{png|tif}
-    data/bright/{lic|mic|hic}/masks/*_damage_mask.{png|tif}
+02_preprocess_data.py  —  Dataset Preprocessing (Revised Methodology)
+=======================================================================
+BRIGHT correct statistics (Zenodo v1.0):
+  • 14 disaster events total
+  • 11 unrestricted events → 3,395 full pre+post+target triplets
+  • 3  restricted events (no pre-event optical) → 851 annotation pairs
+  • 4,246 total annotation pairs across all 14 events
+
+Two-study separation:
+  • Study 1 (DisasterGAN quality): xBD ONLY — optical→optical domain
+  • Study 2 (BRIGHT segmentation): BRIGHT ONLY — no xBD mixing
+
+Income classification by EVENT (not by country substring):
+  LIC: haiti-earthquake, congo-volcano, myanmar-hurricane*
+  MIC: turkey-earthquake, morocco-earthquake, libya-flood,
+       bata-explosion, beirut-explosion, mexico-hurricane*, ukraine-conflict*
+  HIC: hawaii-wildfire, la_palma-volcano, noto-earthquake, marshall-wildfire
+  (* restricted — no pre-event optical)
 
 Usage:
-    python scripts/02_preprocess_data.py [--xbd-only | --bright-only] [--verify]
+    python 02_preprocess_data.py [--bright-only | --xbd-only] [--verify]
 """
 
-import os
-import sys
-import json
-import shutil
-import argparse
+import os, sys, json, shutil, argparse, random
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
-import re
 from collections import defaultdict
 from tqdm import tqdm
 
-# Add project root to path
-SCRIPT_DIR = Path(__file__).parent
+SCRIPT_DIR   = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+DATA_DIR     = PROJECT_ROOT / "data"
 
-################################################################################
-# Configuration
-################################################################################
+XBD_RAW        = DATA_DIR / "xbd_raw"
+BRIGHT_RAW     = DATA_DIR / "bright_raw"
+XBD_PROCESSED  = DATA_DIR / "xbd"
+BRIGHT_DIR     = DATA_DIR / "bright"
 
-DATA_DIR = PROJECT_ROOT / "data"
-XBD_RAW = DATA_DIR / "xbd_raw"
-BRIGHT_RAW = DATA_DIR / "bright_raw"
-XBD_PROCESSED = DATA_DIR / "xbd"
-BRIGHT_PROCESSED = DATA_DIR / "bright"
+SEED = 42
+random.seed(SEED)
 
-# Country to income level mapping (matches COUNTRY_STRATA in code)
-COUNTRY_STRATA = {
-    "LIC": ["haiti", "congo"],
-    "MIC": ["turkey", "morocco", "libya"],
-    "HIC": ["noto", "la_palma", "hawaii"],
+# ─────────────────────────────────────────────────────────────────────────────
+# BRIGHT: event → income level  (14 events from Zenodo)
+# ─────────────────────────────────────────────────────────────────────────────
+EVENT_INCOME = {
+    # LIC
+    "haiti-earthquake":   "lic",
+    "congo-volcano":      "lic",
+    # MIC
+    "turkey-earthquake":  "mic",
+    "morocco-earthquake": "mic",
+    "libya-flood":        "mic",
+    "bata-explosion":     "mic",
+    "beirut-explosion":   "mic",
+    # HIC
+    "hawaii-wildfire":    "hic",
+    "la_palma-volcano":   "hic",
+    "noto-earthquake":    "hic",
+    "marshall-wildfire":  "hic",
+    # Restricted (no pre-event optical → excluded from Study 2 triplets)
+    "mexico-hurricane":   "mic",
+    "myanmar-hurricane":  "lic",
+    "ukraine-conflict":   "mic",
 }
 
-# Reverse mapping for quick lookups
-COUNTRY_TO_INCOME = {}
-for income, countries in COUNTRY_STRATA.items():
-    for country in countries:
-        COUNTRY_TO_INCOME[country.lower()] = income.lower()
+FULL_TRIPLET_EVENTS = {
+    "haiti-earthquake", "congo-volcano",
+    "turkey-earthquake", "morocco-earthquake", "libya-flood",
+    "bata-explosion", "beirut-explosion",
+    "hawaii-wildfire", "la_palma-volcano", "noto-earthquake", "marshall-wildfire",
+}
 
-# Disaster type mappings
-DISASTER_TYPES = [
-    'volcano', 'fire', 'tornado', 'tsunami',
-    'flooding', 'earthquake', 'hurricane', 'wildfire',
-    'explosion', 'eruption', 'flood'
-]
+RESTRICTED_EVENTS = {"mexico-hurricane", "myanmar-hurricane", "ukraine-conflict"}
 
-################################################################################
-# Helper Functions
-################################################################################
+# xBD: event-level split used for DisasterGAN training ONLY (Study 1)
+XBD_TRAIN_EVENTS = {
+    "guatemala-volcano", "hurricane-florence", "hurricane-harvey",
+    "hurricane-matthew", "hurricane-michael", "joplin-tornado",
+    "lower-puna-volcano", "mexico-earthquake", "midwest-flooding",
+    "moore-tornado", "nepal-flooding", "nepal-earthquake",
+    "palu-tsunami", "portugal-wildfire", "santa-rosa-wildfire",
+    "socal-fire", "tuscaloosa-tornado", "woolsey-fire",
+}
+XBD_TEST_EVENTS = {
+    "noto-earthquake", "sunda-strait", "marshall-wildfire",
+}
 
-class Colors:
-    """ANSI color codes for terminal output"""
-    RED = '\033[0;31m'
-    GREEN = '\033[0;32m'
-    YELLOW = '\033[1;33m'
-    BLUE = '\033[0;34m'
-    NC = '\033[0m'  # No Color
-
-def print_section(text: str):
-    """Print a formatted section header"""
-    print(f"\n{Colors.GREEN}{'='*70}{Colors.NC}")
-    print(f"{Colors.GREEN}{text}{Colors.NC}")
-    print(f"{Colors.GREEN}{'='*70}{Colors.NC}\n")
-
-def print_error(text: str):
-    """Print error message"""
-    print(f"{Colors.RED}ERROR: {text}{Colors.NC}")
-
-def print_warning(text: str):
-    """Print warning message"""
-    print(f"{Colors.YELLOW}WARNING: {text}{Colors.NC}")
-
-def print_success(text: str):
-    """Print success message"""
-    print(f"{Colors.GREEN}SUCCESS: {text}{Colors.NC}")
-
-def print_info(text: str):
-    """Print info message"""
-    print(f"{Colors.BLUE}INFO: {text}{Colors.NC}")
-
-def extract_disaster_type(filename: str) -> str:
-    """Extract disaster type from filename"""
-    filename_lower = filename.lower()
-    for disaster in DISASTER_TYPES:
-        if disaster in filename_lower:
-            return disaster
-    return "unknown"
-
-def extract_country_from_filename(filename: str) -> Optional[str]:
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────────────────────
+def _event_from_stem(stem: str) -> str:
     """
-    Extract country/location from BRIGHT filename
-    
-    Expected patterns in BRIGHT filenames from Zenodo:
-    - Contains country name somewhere in the filename
-    - May have various separators (_, -, space)
+    Detect BRIGHT event name from a filename stem.
+    Filenames follow: <event-name>_<tile-id>  e.g. haiti-earthquake_00001
     """
-    filename_lower = filename.lower()
-    
-    # Check for known countries in the COUNTRY_STRATA mapping
-    for income_level, countries in COUNTRY_STRATA.items():
-        for country in countries:
-            # Handle multi-word country names (e.g., "la_palma")
-            country_variations = [
-                country,
-                country.replace('_', ''),
-                country.replace('_', '-'),
-                country.replace('_', ' '),
-            ]
-            for variation in country_variations:
-                if variation in filename_lower:
-                    return country
-    
-    # Special case handling for countries that might appear differently
-    if any(x in filename_lower for x in ['lapalma', 'la_palma', 'la-palma', 'la palma']):
-        return "la_palma"
-    
-    if any(x in filename_lower for x in ['noto', 'japan']):
-        return "noto"
-    
-    return None
-
-def classify_by_income(country: str) -> Optional[str]:
-    """Classify country by income level using COUNTRY_STRATA"""
-    if country is None:
-        return None
-    
-    country_lower = country.lower()
-    
-    # Direct lookup
-    if country_lower in COUNTRY_TO_INCOME:
-        return COUNTRY_TO_INCOME[country_lower]
-    
-    return None
-
-################################################################################
-# xBD Preprocessing
-################################################################################
-
-def tile_image(image_path, output_dir, tile_size=64, original_size=256):
-    """
-    Tile an image into smaller patches.
-    
-    Args:
-        image_path: Path to input image
-        output_dir: Directory to save tiles
-        tile_size: Size of each tile (default 64x64)
-        original_size: Expected input image size (default 256x256)
-    
-    Returns:
-        List of paths to generated tiles
-    """
-    from PIL import Image
-    
-    img = Image.open(image_path)
-    width, height = img.size
-    
-    # Resize if needed to ensure consistent size
-    if width != original_size or height != original_size:
-        img = img.resize((original_size, original_size), Image.LANCZOS)
-        width, height = original_size, original_size
-    
-    tile_paths = []
-    tiles_per_row = width // tile_size
-    tiles_per_col = height // tile_size
-    
-    base_name = image_path.stem
-    
-    for row in range(tiles_per_col):
-        for col in range(tiles_per_row):
-            left = col * tile_size
-            top = row * tile_size
-            right = left + tile_size
-            bottom = top + tile_size
-            
-            tile = img.crop((left, top, right, bottom))
-            
-            # Save with row/col indices in filename
-            tile_name = f"{base_name}_tile_{row}_{col}.png"
-            tile_path = output_dir / tile_name
-            tile.save(tile_path)
-            tile_paths.append(tile_path)
-    
-    return tile_paths
+    for event in sorted(EVENT_INCOME.keys(), key=len, reverse=True):
+        if stem.startswith(event) or event.replace("-", "_") in stem:
+            return event
+    # fallback: first two underscore-joined tokens
+    parts = stem.replace("-", "_").split("_")
+    return "_".join(parts[:2]) if len(parts) >= 2 else stem
 
 
-def convert_mask_rgb_to_classes(mask_path, output_path):
+def _income(event: str) -> str:
+    return EVENT_INCOME.get(event, "unknown")
+
+
+def _save_manifest(records: list, path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as fh:
+        json.dump(records, fh, indent=2)
+    print(f"  Manifest → {path}  ({len(records)} records)")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BRIGHT preprocessing
+# ─────────────────────────────────────────────────────────────────────────────
+def build_bright_triplets() -> list:
     """
-    Convert RGB damage mask to class indices.
-    
-    Color mapping:
-        - Black (0,0,0): Background/No Damage (class 0)
-        - Cyan (0,255,255): No Damage (class 0)
-        - Blue (0,0,255): Minor Damage (class 1)
-        - Yellow (255,255,0): Major Damage (class 2)
-        - Red (255,0,0): Destroyed (class 3)
-        - Light Gray (211,211,211): Unclassified -> No Damage (class 0)
-    
-    Args:
-        mask_path: Path to RGB mask image
-        output_path: Path to save class-indexed mask
-    
-    Returns:
-        Dictionary with class distribution statistics
+    Scan BRIGHT raw directories and build a list of (pre, post, target) triplets.
+    Only full-triplet events (11 unrestricted) are included.
+    Returns list of dicts with keys: event, income, pre_img, post_img, mask
     """
-    from PIL import Image
-    import numpy as np
-    
-    # Load RGB mask
-    mask_rgb = np.array(Image.open(mask_path).convert('RGB'))
-    h, w = mask_rgb.shape[:2]
-    
-    # Initialize class mask
-    label_mask = np.zeros((h, w), dtype=np.uint8)
-    
-    # Color to class mapping
-    color_to_label = {
-        (0, 0, 0): 0,          # black: background
-        (0, 255, 255): 0,      # cyan: no damage
-        (0, 0, 255): 1,        # blue: minor
-        (255, 255, 0): 2,      # yellow: major
-        (255, 0, 0): 3,        # red: destroyed
-        (211, 211, 211): 0     # lightgray: unclassified -> no damage
-    }
-    
-    # Apply mapping with tolerance for slight color variations
-    for rgb, label in color_to_label.items():
-        # Exact match
-        mask = np.all(mask_rgb == rgb, axis=-1)
-        label_mask[mask] = label
-        
-        # Tolerance match (±10 in each channel)
-        tolerance = 10
-        mask_tol = (
-            (np.abs(mask_rgb[:,:,0] - rgb[0]) <= tolerance) &
-            (np.abs(mask_rgb[:,:,1] - rgb[1]) <= tolerance) &
-            (np.abs(mask_rgb[:,:,2] - rgb[2]) <= tolerance)
-        )
-        label_mask[mask_tol] = label
-    
-    # Save as grayscale PNG with pixel values 0-3
-    Image.fromarray(label_mask, mode='L').save(output_path)
-    
-    # Calculate statistics
-    unique, counts = np.unique(label_mask, return_counts=True)
-    class_dist = dict(zip(unique, counts))
-    
-    return class_dist
+    # Locate pre / post / target directories
+    pre_dir = post_dir = tgt_dir = None
+    for d in BRIGHT_RAW.rglob("*"):
+        if not d.is_dir():
+            continue
+        n = d.name.lower()
+        if "pre" in n and pre_dir is None:
+            pre_dir = d
+        elif "post" in n and post_dir is None:
+            post_dir = d
+        elif ("target" in n or "label" in n) and tgt_dir is None:
+            tgt_dir = d
+
+    if not all([pre_dir, post_dir, tgt_dir]):
+        print(f"  [warn] Could not locate all BRIGHT sub-dirs in {BRIGHT_RAW}")
+        print(f"    pre={pre_dir}  post={post_dir}  target={tgt_dir}")
+        return []
+
+    # Index post and target by stem
+    EXTS = {".png", ".tif", ".tiff", ".jpg", ".jpeg"}
+    post_idx = {f.stem: f for f in post_dir.iterdir() if f.suffix.lower() in EXTS}
+    tgt_idx  = {f.stem: f for f in tgt_dir.iterdir()  if f.suffix.lower() in EXTS}
+
+    triplets = []
+    skipped  = 0
+
+    for pre_file in sorted(pre_dir.iterdir()):
+        if pre_file.suffix.lower() not in EXTS:
+            continue
+        stem  = pre_file.stem
+        event = _event_from_stem(stem)
+
+        if event not in FULL_TRIPLET_EVENTS:
+            skipped += 1
+            continue
+
+        post_file = post_idx.get(stem)
+        tgt_file  = tgt_idx.get(stem)
+
+        if post_file is None or tgt_file is None:
+            skipped += 1
+            continue
+
+        triplets.append({
+            "event":    event,
+            "income":   _income(event),
+            "pre_img":  str(pre_file),
+            "post_img": str(post_file),
+            "mask":     str(tgt_file),
+        })
+
+    print(f"  Built {len(triplets)} full triplets ({skipped} skipped/restricted)")
+    return triplets
+
+
+def split_bright_by_income(triplets: list) -> dict:
+    """
+    Split triplets by income level.  Split is BY EVENT (not random tile split)
+    so that no event appears in both train and val of the same stratum.
+    Returns dict: income → {"train": [...], "val": [...]}
+    """
+    by_income: dict = defaultdict(list)
+    for t in triplets:
+        by_income[t["income"]].append(t)
+
+    splits = {}
+    for income, records in by_income.items():
+        # Group by event, then put last event as val (ensures no data leakage)
+        by_event: dict = defaultdict(list)
+        for r in records:
+            by_event[r["event"]].append(r)
+
+        events = sorted(by_event.keys())
+        val_events = events[-1:]          # last event alphabetically = val
+        train_events = events[:-1]
+
+        train = [r for e in train_events for r in by_event[e]]
+        val   = [r for e in val_events   for r in by_event[e]]
+
+        splits[income] = {"train": train, "val": val}
+        print(f"  {income.upper()}: {len(train)} train tiles "
+              f"({len(train_events)} events), {len(val)} val tiles "
+              f"(event: {val_events})")
+
+    return splits
+
+
+def compute_bright_statistics(triplets: list):
+    """Print corrected BRIGHT dataset statistics for the paper."""
+    print("\n" + "=" * 60)
+    print("BRIGHT Dataset Statistics (Zenodo v1.0)")
+    print("=" * 60)
+    by_income  = defaultdict(int)
+    by_event   = defaultdict(int)
+    for t in triplets:
+        by_income[t["income"]] += 1
+        by_event[t["event"]]   += 1
+
+    print(f"Total full triplets (11 unrestricted events): {len(triplets)}")
+    print(f"  Target: ~3,395 triplets")
+    print(f"Restricted events (no pre-event optical):     {len(RESTRICTED_EVENTS)}")
+    print(f"  → ~851 annotation pairs (post+target only)")
+    print(f"Total annotation pairs across 14 events:      ~4,246\n")
+
+    print("Per income level:")
+    for inc in ["lic", "mic", "hic"]:
+        print(f"  {inc.upper()}: {by_income[inc]} tiles")
+
+    print("\nPer event:")
+    for event, count in sorted(by_event.items()):
+        print(f"  {event:<30s}  {count:>5d}  [{EVENT_INCOME[event].upper()}]")
+    print("=" * 60)
+
+
+def preprocess_bright():
+    """Main BRIGHT preprocessing: build manifests per income stratum."""
+    print("\n[BRIGHT] Preprocessing …")
+
+    if not BRIGHT_RAW.exists():
+        print(f"  [error] BRIGHT raw data not found at {BRIGHT_RAW}")
+        print("  Run 01_download_datasets.sh first.")
+        return False
+
+    triplets = build_bright_triplets()
+    if not triplets:
+        print("  [error] No triplets found — check BRIGHT_RAW directory structure.")
+        return False
+
+    compute_bright_statistics(triplets)
+    splits = split_bright_by_income(triplets)
+
+    # Save per-income manifests
+    for income, split_data in splits.items():
+        out_dir = BRIGHT_DIR / income
+        out_dir.mkdir(parents=True, exist_ok=True)
+        _save_manifest(split_data["train"], out_dir / "manifest_train.json")
+        _save_manifest(split_data["val"],   out_dir / "manifest_val.json")
+        # Combined manifest (used by 15b visualisation)
+        _save_manifest(split_data["train"] + split_data["val"],
+                       out_dir / "manifest.json")
+
+    return True
+
+# ─────────────────────────────────────────────────────────────────────────────
+# xBD preprocessing  (Study 1 ONLY — DisasterGAN, optical domain)
+# ─────────────────────────────────────────────────────────────────────────────
+def _event_from_xbd_stem(stem: str) -> str:
+    """Extract event name from xBD filename: disaster-location_NNNNNNNN_pre_disaster"""
+    return "_".join(stem.split("_")[:-2]) if "_" in stem else stem
 
 
 def preprocess_xbd():
     """
-    Organize and preprocess xBD dataset:
-    1. Copy images and labels to organized structure
-    2. Tile 256x256 images into 64x64 patches (4x4 grid)
-    3. Convert RGB masks to class-indexed masks
-    
-    Expected output structure:
-        data/xbd/
-        ├── train/
-        │   ├── images/
-        │   │   ├── disaster-location_NNNNNNNN_pre_disaster.png (256x256 original)
-        │   │   └── disaster-location_NNNNNNNN_post_disaster.png
-        │   ├── images_tiled/
-        │   │   ├── disaster-location_NNNNNNNN_pre_disaster_tile_0_0.png (64x64)
-        │   │   └── ... (16 tiles per image)
-        │   ├── labels/
-        │   │   └── disaster-location_NNNNNNNN_pre_disaster.json
-        │   └── masks_class/
-        │       └── disaster-location_NNNNNNNN_post_disaster_mask.png (class indices)
-        └── (tier1, tier3, hold, test with same structure)
+    Organize xBD into event-level train/test split for DisasterGAN.
+    Study 1 only — xBD is NEVER mixed into BRIGHT segmentation (Study 2).
     """
-    print_section("Preprocessing xBD Dataset")
-    
+    print("\n[xBD] Preprocessing for DisasterGAN (Study 1) …")
+
     if not XBD_RAW.exists():
-        print_error(f"xBD raw data not found at {XBD_RAW}")
-        print_info("Please run download script first: bash scripts/01_download_datasets.sh")
+        print(f"  [error] xBD raw data not found at {XBD_RAW}")
         return False
-    
-    # Create output directory structure
-    splits = ['train', 'tier1', 'tier3', 'hold', 'test']
-    for split in splits:
-        (XBD_PROCESSED / split / "images").mkdir(parents=True, exist_ok=True)
-        (XBD_PROCESSED / split / "images_tiled").mkdir(parents=True, exist_ok=True)
-        (XBD_PROCESSED / split / "labels").mkdir(parents=True, exist_ok=True)
-        (XBD_PROCESSED / split / "masks_class").mkdir(parents=True, exist_ok=True)
-    
-    # Find xBD data structure
-    print_info("Analyzing xBD directory structure...")
-    
-    # Common xBD directory patterns from Kaggle
-    possible_roots = [
-        XBD_RAW,
-        XBD_RAW / "xview2",
-        XBD_RAW / "xBD",
-        XBD_RAW / "xbd-dataset",
-        XBD_RAW / "xbd",
-    ]
-    
-    xbd_root = None
-    for root in possible_roots:
-        if root.exists():
-            # Check if it contains expected subdirectories
-            has_splits = any((root / split).exists() for split in splits)
-            if has_splits:
-                xbd_root = root
-                break
-            # Also check for just 'train' which is minimum requirement
-            if (root / "train").exists():
-                xbd_root = root
-                break
-    
-    if xbd_root is None:
-        # Try to find images directory recursively
-        print_info("Searching for xBD structure...")
-        image_dirs = list(XBD_RAW.rglob("*images*"))
-        if image_dirs:
-            # Go up two levels (images -> split -> root)
-            xbd_root = image_dirs[0].parent.parent
+
+    EXTS = {".png", ".jpg", ".jpeg"}
+    splits_out = {"train": XBD_PROCESSED / "train",
+                  "test":  XBD_PROCESSED / "test"}
+    for d in splits_out.values():
+        (d / "images").mkdir(parents=True, exist_ok=True)
+        (d / "labels").mkdir(parents=True, exist_ok=True)
+
+    # Find all images recursively
+    all_images = [f for f in XBD_RAW.rglob("*_pre_disaster.*")
+                  if f.suffix.lower() in EXTS]
+    print(f"  Found {len(all_images)} pre-disaster images in xBD")
+
+    train_manifest, test_manifest = [], []
+
+    for pre_path in tqdm(all_images, desc="  Organising xBD"):
+        stem  = pre_path.stem.replace("_pre_disaster", "")
+        event = _event_from_xbd_stem(stem)
+        split = "test" if event in XBD_TEST_EVENTS else "train"
+        out   = splits_out[split]
+
+        post_path = pre_path.parent / f"{stem}_post_disaster{pre_path.suffix}"
+        mask_path = pre_path.parent.parent / "labels" / f"{stem}_post_disaster.json"
+
+        try:
+            shutil.copy2(pre_path,  out / "images" / pre_path.name)
+            if post_path.exists():
+                shutil.copy2(post_path, out / "images" / post_path.name)
+            if mask_path.exists():
+                shutil.copy2(mask_path, out / "labels" / mask_path.name)
+        except Exception as exc:
+            print(f"  [warn] {pre_path.name}: {exc}")
+            continue
+
+        record = {
+            "event":    event,
+            "pre_img":  str(out / "images" / pre_path.name),
+            "post_img": str(out / "images" / post_path.name) if post_path.exists() else "",
+            "label":    str(out / "labels" / mask_path.name) if mask_path.exists() else "",
+        }
+        if split == "train":
+            train_manifest.append(record)
         else:
-            print_error("Could not determine xBD directory structure")
-            print_info("Expected structure: xbd_raw/{train,tier1,tier3,hold,test}/{images,labels}/")
-            return False
-    
-    print_success(f"Found xBD root at: {xbd_root}")
-    
-    # Process each split
-    stats = defaultdict(lambda: {
-        "images": 0, "labels": 0, "pre": 0, "post": 0,
-        "tiles": 0, "masks_converted": 0
-    })
-    
-    for split in splits:
-        split_dir = xbd_root / split
-        if not split_dir.exists():
-            print_warning(f"Split '{split}' not found, skipping...")
-            continue
-        
-        print_info(f"Processing {split} split...")
-        
-        # Find images and labels
-        images_dir = split_dir / "images"
-        labels_dir = split_dir / "labels"
-        
-        if not images_dir.exists():
-            print_warning(f"Images directory not found for {split}")
-            continue
-        
-        # Copy and process images
-        image_files = list(images_dir.glob("*.png")) + list(images_dir.glob("*.jpg"))
-        
-        for img_file in tqdm(image_files, desc=f"  Processing {split} images", leave=False):
-            # Copy original image
-            dest = XBD_PROCESSED / split / "images" / img_file.name
-            shutil.copy2(img_file, dest)
-            stats[split]["images"] += 1
-            
-            # Count pre/post for verification
-            is_pre = "_pre_disaster" in img_file.name
-            is_post = "_post_disaster" in img_file.name
-            
-            if is_pre:
-                stats[split]["pre"] += 1
-            elif is_post:
-                stats[split]["post"] += 1
-            
-            # Tile the image into 64x64 patches
-            try:
-                tile_output_dir = XBD_PROCESSED / split / "images_tiled"
-                tiles = tile_image(img_file, tile_output_dir, tile_size=64, original_size=256)
-                stats[split]["tiles"] += len(tiles)
-            except Exception as e:
-                print_warning(f"Failed to tile {img_file.name}: {e}")
-        
-        # Copy labels if they exist
-        if labels_dir.exists():
-            label_files = list(labels_dir.glob("*.json"))
-            for label_file in tqdm(label_files, desc=f"  Copying {split} labels", leave=False):
-                dest = XBD_PROCESSED / split / "labels" / label_file.name
-                shutil.copy2(label_file, dest)
-                stats[split]["labels"] += 1
-        
-        # Look for masks directory and convert RGB masks to class indices
-        masks_dir = split_dir / "masks"
-        if masks_dir.exists():
-            print_info(f"  Converting RGB masks to class indices for {split}...")
-            mask_files = list(masks_dir.glob("*.png")) + list(masks_dir.glob("*.jpg"))
-            
-            for mask_file in tqdm(mask_files, desc=f"  Converting {split} masks", leave=False):
-                try:
-                    output_path = XBD_PROCESSED / split / "masks_class" / mask_file.name
-                    class_dist = convert_mask_rgb_to_classes(mask_file, output_path)
-                    stats[split]["masks_converted"] += 1
-                except Exception as e:
-                    print_warning(f"Failed to convert mask {mask_file.name}: {e}")
-    
-    # Print statistics
-    print_section("xBD Processing Statistics")
-    total_images = 0
-    total_labels = 0
-    total_pre = 0
-    total_post = 0
-    total_tiles = 0
-    total_masks = 0
-    
-    for split in splits:
-        images = stats[split]["images"]
-        labels = stats[split]["labels"]
-        pre = stats[split]["pre"]
-        post = stats[split]["post"]
-        tiles = stats[split]["tiles"]
-        masks = stats[split]["masks_converted"]
-        
-        total_images += images
-        total_labels += labels
-        total_pre += pre
-        total_post += post
-        total_tiles += tiles
-        total_masks += masks
-        
-        if images > 0 or labels > 0:
-            print(f"  {split:10s}: {images:6d} images ({pre:5d} pre, {post:5d} post), "
-                  f"{tiles:6d} tiles, {labels:6d} labels, {masks:6d} masks")
-    
-    print(f"\n  {'TOTAL':10s}: {total_images:6d} images ({total_pre:5d} pre, {total_post:5d} post), "
-          f"{total_tiles:6d} tiles, {total_labels:6d} labels, {total_masks:6d} masks")
-    
-    print_success(f"xBD dataset organized at: {XBD_PROCESSED}")
-    print_info(f"  - Original images (256×256): {XBD_PROCESSED}/{{split}}/images/")
-    print_info(f"  - Tiled images (64×64): {XBD_PROCESSED}/{{split}}/images_tiled/")
-    print_info(f"  - Class masks: {XBD_PROCESSED}/{{split}}/masks_class/")
-    
+            test_manifest.append(record)
+
+    _save_manifest(train_manifest, XBD_PROCESSED / "train_manifest.json")
+    _save_manifest(test_manifest,  XBD_PROCESSED / "test_manifest.json")
+
+    print(f"  xBD train: {len(train_manifest)} tiles  "
+          f"(events: {len(XBD_TRAIN_EVENTS)})")
+    print(f"  xBD test:  {len(test_manifest)} tiles  "
+          f"(events: {len(XBD_TEST_EVENTS)})")
     return True
 
-################################################################################
-# BRIGHT Preprocessing
-################################################################################
-
-def preprocess_bright():
-    """
-    Organize BRIGHT dataset by income level based on country classification.
-    
-    Expected output structure:
-        data/bright/
-        ├── lic/
-        │   ├── images/
-        │   │   ├── country_disaster_00000_pre_disaster.png  (RGB optical)
-        │   │   └── country_disaster_00000_post_disaster.tif (SAR)
-        │   └── masks/
-        │       └── country_disaster_00000_damage_mask.png
-        └── (mic, hic with same structure)
-    """
-    print_section("Preprocessing BRIGHT Dataset")
-    
-    if not BRIGHT_RAW.exists():
-        print_error(f"BRIGHT raw data not found at {BRIGHT_RAW}")
-        print_info("Please run download script first: bash scripts/01_download_datasets.sh")
-        return False
-    
-    # Create output directory structure
-    for income in ['lic', 'mic', 'hic']:
-        (BRIGHT_PROCESSED / income / "images").mkdir(parents=True, exist_ok=True)
-        (BRIGHT_PROCESSED / income / "masks").mkdir(parents=True, exist_ok=True)
-    
-    print_info("Analyzing BRIGHT directory structure...")
-    
-    # Find pre-event, post-event, and target directories
-    pre_event_dir = None
-    post_event_dir = None
-    target_dir = None
-    
-    # Search for directories (case-insensitive)
-    for subdir in BRIGHT_RAW.rglob("*"):
-        if subdir.is_dir():
-            name = subdir.name.lower()
-            if 'pre' in name and 'event' in name and pre_event_dir is None:
-                pre_event_dir = subdir
-            elif 'post' in name and 'event' in name and post_event_dir is None:
-                post_event_dir = subdir
-            elif ('target' in name or 'label' in name) and target_dir is None:
-                target_dir = subdir
-    
-    if not all([pre_event_dir, post_event_dir, target_dir]):
-        print_error("Could not find all required BRIGHT directories")
-        print_info(f"Pre-event: {pre_event_dir}")
-        print_info(f"Post-event: {post_event_dir}")
-        print_info(f"Target: {target_dir}")
-        print_info("\nExpected after unzipping Zenodo files:")
-        print_info("  - pre-event/  (from pre-event.zip)")
-        print_info("  - post-event/ (from post-event.zip)")
-        print_info("  - target/     (from target.zip)")
-        return False
-    
-    print_success(f"Pre-event directory: {pre_event_dir}")
-    print_success(f"Post-event directory: {post_event_dir}")
-    print_success(f"Target directory: {target_dir}")
-    
-    # Get all files from each directory
-    pre_files = list(pre_event_dir.glob("*.*"))
-    pre_files = [f for f in pre_files if f.suffix.lower() in ['.png', '.jpg', '.jpeg', '.tif', '.tiff']]
-    
-    post_files = list(post_event_dir.glob("*.*"))
-    post_files = [f for f in post_files if f.suffix.lower() in ['.png', '.jpg', '.jpeg', '.tif', '.tiff']]
-    
-    target_files = list(target_dir.glob("*.*"))
-    target_files = [f for f in target_files if f.suffix.lower() in ['.png', '.jpg', '.jpeg', '.tif', '.tiff']]
-    
-    print_info(f"Found {len(pre_files)} pre-disaster images")
-    print_info(f"Found {len(post_files)} post-disaster images")
-    print_info(f"Found {len(target_files)} target masks")
-    
-    # Create lookup dictionaries by base name
-    print_info("Building file mappings...")
-    
-    def get_base_identifier(filepath: Path) -> str:
-        """
-        Extract base identifier from filename for matching.
-        Removes common suffixes and normalizes.
-        """
-        name = filepath.stem.lower()
-        
-        # Remove common suffixes
-        for suffix in ['_pre', '_post', '_target', '_label', '_mask', 
-                      '-pre', '-post', '-target', '-label', '-mask',
-                      'pre', 'post', 'target', 'label', 'mask']:
-            name = name.replace(suffix, '')
-        
-        # Remove trailing/leading underscores and dashes
-        name = name.strip('_-')
-        
-        return name
-    
-    # Build lookups
-    post_lookup = {}
-    for f in post_files:
-        base = get_base_identifier(f)
-        post_lookup[base] = f
-    
-    target_lookup = {}
-    for f in target_files:
-        base = get_base_identifier(f)
-        target_lookup[base] = f
-    
-    # Process each pre-disaster image
-    stats = defaultdict(lambda: {"pre": 0, "post": 0, "mask": 0})
-    skipped = {"no_country": 0, "no_post": 0, "no_mask": 0}
-    sequence_counters = defaultdict(lambda: defaultdict(int))
-    unmatched_files = []
-    
-    print_info("\nProcessing and organizing files by country...")
-    
-    for pre_file in tqdm(pre_files, desc="Processing BRIGHT images"):
-        # Extract country from filename
-        country = extract_country_from_filename(pre_file.name)
-        
-        if country is None:
-            skipped["no_country"] += 1
-            unmatched_files.append(pre_file.name)
-            continue
-        
-        # Classify by income level
-        income_level = classify_by_income(country)
-        
-        if income_level is None:
-            skipped["no_country"] += 1
-            print_warning(f"Country '{country}' not in COUNTRY_STRATA: {pre_file.name}")
-            continue
-        
-        # Extract disaster type
-        disaster_type = extract_disaster_type(pre_file.name)
-        
-        # Get sequence number for this country-disaster combination
-        key = f"{country}_{disaster_type}"
-        sequence = sequence_counters[income_level][key]
-        sequence_counters[income_level][key] += 1
-        
-        # Create standardized filename (matches GitHub loading code expectations)
-        # Format: {country}_{disaster_type}_{sequence:05d}_{timing}.{ext}
-        new_base = f"{country}_{disaster_type}_{sequence:05d}"
-        
-        # Copy pre-disaster image (should be .png for optical)
-        pre_dest = BRIGHT_PROCESSED / income_level / "images" / f"{new_base}_pre_disaster{pre_file.suffix}"
-        shutil.copy2(pre_file, pre_dest)
-        stats[income_level]["pre"] += 1
-        
-        # Find and copy corresponding post-disaster image (should be .tif for SAR)
-        base_identifier = get_base_identifier(pre_file)
-        
-        if base_identifier in post_lookup:
-            post_file = post_lookup[base_identifier]
-            post_dest = BRIGHT_PROCESSED / income_level / "images" / f"{new_base}_post_disaster{post_file.suffix}"
-            shutil.copy2(post_file, post_dest)
-            stats[income_level]["post"] += 1
-        else:
-            skipped["no_post"] += 1
-        
-        # Find and copy corresponding mask
-        if base_identifier in target_lookup:
-            mask_file = target_lookup[base_identifier]
-            mask_dest = BRIGHT_PROCESSED / income_level / "masks" / f"{new_base}_damage_mask{mask_file.suffix}"
-            shutil.copy2(mask_file, mask_dest)
-            stats[income_level]["mask"] += 1
-        else:
-            skipped["no_mask"] += 1
-    
-    # Print statistics
-    print_section("BRIGHT Processing Statistics")
-    
-    print(f"Country Classification (COUNTRY_STRATA):")
-    for income in ['LIC', 'MIC', 'HIC']:
-        countries = ', '.join(COUNTRY_STRATA[income])
-        print(f"  {income}: {countries}")
-    
-    print(f"\nProcessed Files by Income Level:")
-    for income_level in ['lic', 'mic', 'hic']:
-        print(f"\n{income_level.upper()}:")
-        print(f"  Pre-disaster images:  {stats[income_level]['pre']:6d}")
-        print(f"  Post-disaster images: {stats[income_level]['post']:6d}")
-        print(f"  Damage masks:         {stats[income_level]['mask']:6d}")
-    
-    total_pre = sum(stats[level]["pre"] for level in ['lic', 'mic', 'hic'])
-    total_post = sum(stats[level]["post"] for level in ['lic', 'mic', 'hic'])
-    total_mask = sum(stats[level]["mask"] for level in ['lic', 'mic', 'hic'])
-    
-    print(f"\n{'TOTAL':3s}:")
-    print(f"  Pre-disaster images:  {total_pre:6d}")
-    print(f"  Post-disaster images: {total_post:6d}")
-    print(f"  Damage masks:         {total_mask:6d}")
-    
-    # Print skipped files
-    if any(skipped.values()):
-        print(f"\nSkipped Files:")
-        print(f"  No country identified: {skipped['no_country']:6d}")
-        print(f"  No matching post:      {skipped['no_post']:6d}")
-        print(f"  No matching mask:      {skipped['no_mask']:6d}")
-        
-        if unmatched_files and len(unmatched_files) <= 10:
-            print(f"\nUnmatched filenames (sample):")
-            for fname in unmatched_files[:10]:
-                print(f"  - {fname}")
-    
-    # Calculate distribution percentages
-    if total_pre > 0:
-        print(f"\nIncome Distribution:")
-        for income_level in ['lic', 'mic', 'hic']:
-            count = stats[income_level]['pre']
-            pct = (count / total_pre) * 100
-            print(f"  {income_level.upper()}: {count:4d} events ({pct:5.1f}%)")
-    
-    print_success(f"\nBRIGHT dataset organized at: {BRIGHT_PROCESSED}")
-    
-    # Verify files match the expected naming convention
-    print_info("\nVerifying naming convention...")
-    sample_files = list((BRIGHT_PROCESSED / "lic" / "images").glob("*_pre_disaster.*"))[:3]
-    if sample_files:
-        print("Sample filenames:")
-        for f in sample_files:
-            print(f"  {f.name}")
-    
-    return True
-
-################################################################################
+# ─────────────────────────────────────────────────────────────────────────────
 # Verification
-################################################################################
+# ─────────────────────────────────────────────────────────────────────────────
+def verify():
+    ok = True
+    print("\n[Verify] Checking manifest files …")
+    for income in ["lic", "mic", "hic"]:
+        for split in ["train", "val"]:
+            p = BRIGHT_DIR / income / f"manifest_{split}.json"
+            if p.exists():
+                with open(p) as fh:
+                    n = len(json.load(fh))
+                print(f"  BRIGHT/{income}/manifest_{split}.json  →  {n} records ✓")
+            else:
+                print(f"  [MISSING] {p}")
+                ok = False
 
-def verify_dataset_structure():
-    """Verify that datasets match GitHub code expectations"""
-    print_section("Verifying Dataset Structure")
-    
-    issues = []
-    warnings = []
-    
-    # Verify xBD structure
-    if XBD_PROCESSED.exists():
-        print_info("Checking xBD structure...")
-        for split in ['train', 'tier1', 'tier3', 'hold', 'test']:
-            images_dir = XBD_PROCESSED / split / "images"
-            labels_dir = XBD_PROCESSED / split / "labels"
-            
-            if not images_dir.exists():
-                issues.append(f"Missing xBD/{split}/images directory")
-            if not labels_dir.exists():
-                issues.append(f"Missing xBD/{split}/labels directory")
-            
-            # Check for pre/post pairs and naming convention
-            if images_dir.exists():
-                pre_images = list(images_dir.glob("*_pre_disaster.*"))
-                post_images = list(images_dir.glob("*_post_disaster.*"))
-                
-                if len(pre_images) != len(post_images):
-                    warnings.append(f"xBD/{split}: Mismatch between pre ({len(pre_images)}) and post ({len(post_images)}) images")
-                
-                # Verify naming convention matches GitHub code expectations
-                if pre_images:
-                    sample = pre_images[0].name
-                    if not re.match(r'.+_.+_pre_disaster\.(png|jpg)', sample):
-                        warnings.append(f"xBD/{split}: Filename may not match expected pattern: {sample}")
-    else:
-        print_info("xBD not processed, skipping verification")
-    
-    # Verify BRIGHT structure
-    if BRIGHT_PROCESSED.exists():
-        print_info("Checking BRIGHT structure...")
-        for income in ['lic', 'mic', 'hic']:
-            images_dir = BRIGHT_PROCESSED / income / "images"
-            masks_dir = BRIGHT_PROCESSED / income / "masks"
-            
-            if not images_dir.exists():
-                issues.append(f"Missing BRIGHT/{income}/images directory")
-            if not masks_dir.exists():
-                issues.append(f"Missing BRIGHT/{income}/masks directory")
-            
-            # Check for pre/post pairs and naming convention
-            if images_dir.exists():
-                pre_images = list(images_dir.glob("*_pre_disaster.*"))
-                post_images = list(images_dir.glob("*_post_disaster.*"))
-                masks = list(masks_dir.glob("*_damage_mask.*")) if masks_dir.exists() else []
-                
-                print(f"  {income.upper()}: {len(pre_images)} pre, {len(post_images)} post, {len(masks)} masks")
-                
-                # Verify naming convention matches GitHub code expectations
-                if pre_images:
-                    sample = pre_images[0].name
-                    # Expected: {country}_{disaster}_{sequence}_pre_disaster.{ext}
-                    if not re.match(r'[a-z_]+_[a-z]+_\d+_pre_disaster\.(png|tif|jpg)', sample):
-                        warnings.append(f"BRIGHT/{income}: Filename may not match expected pattern: {sample}")
-                
-                # Allow some mismatch since not all images may have all components
-                if abs(len(pre_images) - len(post_images)) > max(1, len(pre_images) * 0.1):
-                    warnings.append(f"BRIGHT/{income}: Significant mismatch between pre ({len(pre_images)}) and post ({len(post_images)}) images")
-    else:
-        print_info("BRIGHT not processed, skipping verification")
-    
-    if not issues and not warnings:
-        print_success("All dataset structures verified successfully!")
-        return True
-    elif not issues:
-        print_success("No critical issues found (warnings may be acceptable)")
-        return True
-    else:
-        return False
+    for split in ["train", "test"]:
+        p = XBD_PROCESSED / f"{split}_manifest.json"
+        if p.exists():
+            with open(p) as fh:
+                n = len(json.load(fh))
+            print(f"  xBD/{split}_manifest.json  →  {n} records ✓")
+        # xBD manifests are optional (only needed for Study 1)
+    return ok
 
-################################################################################
-# Main
-################################################################################
-
+# ─────────────────────────────────────────────────────────────────────────────
+# CLI
+# ─────────────────────────────────────────────────────────────────────────────
 def main():
-    parser = argparse.ArgumentParser(
-        description="Preprocess xBD and BRIGHT datasets to match GitHub code structure",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python scripts/02_preprocess_data.py                    # Process both datasets
-  python scripts/02_preprocess_data.py --xbd-only         # Process only xBD
-  python scripts/02_preprocess_data.py --bright-only      # Process only BRIGHT
-  python scripts/02_preprocess_data.py --verify           # Process and verify
-
-Country Classification (COUNTRY_STRATA):
-  LIC: haiti, congo
-  MIC: turkey, morocco, libya
-  HIC: noto, la_palma, hawaii
-
-Output Structure:
-  xBD:    data/xbd/{train,tier1,tier3,hold,test}/{images,labels}/
-  BRIGHT: data/bright/{lic,mic,hic}/{images,masks}/
-        """
-    )
-    parser.add_argument('--xbd-only', action='store_true',
-                       help='Process only xBD dataset')
-    parser.add_argument('--bright-only', action='store_true',
-                       help='Process only BRIGHT dataset')
-    parser.add_argument('--verify', action='store_true',
-                       help='Verify dataset structure after preprocessing')
-    
+    parser = argparse.ArgumentParser(description="Preprocess xBD and BRIGHT datasets")
+    parser.add_argument("--bright-only", action="store_true")
+    parser.add_argument("--xbd-only",    action="store_true")
+    parser.add_argument("--verify",      action="store_true")
     args = parser.parse_args()
-    
-    # Determine what to process
-    process_xbd = not args.bright_only
-    process_bright = not args.xbd_only
-    
-    print_section("Dataset Preprocessing for GitHub Codebase")
-    print(f"Project root: {PROJECT_ROOT}")
-    print(f"Data directory: {DATA_DIR}")
-    print(f"Process xBD: {process_xbd}")
-    print(f"Process BRIGHT: {process_bright}")
-    
-    if process_bright:
-        print(f"\nCountry to Income Classification:")
-        for income, countries in COUNTRY_STRATA.items():
-            print(f"  {income}: {', '.join(countries)}")
-    
-    # Process datasets
-    success = True
-    
-    if process_xbd:
-        if not preprocess_xbd():
-            success = False
-    
-    if process_bright:
-        if not preprocess_bright():
-            success = False
-    
-    # Always verify to ensure GitHub compatibility
-    print_info("\nRunning automatic verification...")
-    if not verify_dataset_structure():
-        print_warning("Verification found issues - please review")
-    
-    # Final summary
-    print_section("Preprocessing Complete")
-    
-    if success:
-        print_success("All datasets processed successfully!")
-        print("\nDataset locations:")
-        if process_xbd and XBD_PROCESSED.exists():
-            print(f"  xBD:    {XBD_PROCESSED}")
-        if process_bright and BRIGHT_PROCESSED.exists():
-            print(f"  BRIGHT: {BRIGHT_PROCESSED}")
-        
-        print("\nDataset structure matches GitHub code expectations:")
-        print("  File naming conventions")
-        print("  Directory organization")
-        print("  Pre/post/mask pairing")
-        
-        # Write report
-        report_file = DATA_DIR / "preprocessing_report.txt"
-        with open(report_file, 'w') as f:
-            f.write(f"Preprocessing completed: {Path.cwd()}\n")
-            f.write(f"Timestamp: {Path.cwd()}\n\n")
-            f.write(f"xBD processed: {process_xbd}\n")
-            f.write(f"BRIGHT processed: {process_bright}\n\n")
-            if process_xbd:
-                f.write(f"xBD location: {XBD_PROCESSED}\n")
-            if process_bright:
-                f.write(f"BRIGHT location: {BRIGHT_PROCESSED}\n")
-                f.write(f"\nCountry Classification:\n")
-                for income, countries in COUNTRY_STRATA.items():
-                    f.write(f"  {income}: {', '.join(countries)}\n")
-        
-        return 0
-    else:
-        print_error("Preprocessing completed with errors")
-        return 1
+
+    do_bright = not args.xbd_only
+    do_xbd    = not args.bright_only
+
+    print("=" * 60)
+    print("02  —  Dataset Preprocessing (Revised Methodology)")
+    print("=" * 60)
+    print(f"PROJECT_ROOT : {PROJECT_ROOT}")
+    print(f"Process BRIGHT: {do_bright}")
+    print(f"Process xBD  : {do_xbd} (Study 1 / DisasterGAN only)")
+
+    if do_bright:
+        preprocess_bright()
+    if do_xbd:
+        preprocess_xbd()
+    if args.verify or True:   # always verify
+        verify()
+
+    print("\nPreprocessing complete.")
+
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

@@ -1,267 +1,244 @@
-import os
-import sys
+"""
+07_evaluate_quality_metrics.py  —  Study 1: DisasterGAN Mask Quality Evaluation
+=================================================================================
+BUG FIXES vs original:
+  1. Removed phantom 'F1' key (F1 == Dice; original KeyError on line 143/184).
+  2. Added Figure 7 with a CORRECT discrete colormap and unambiguous legend
+     using BoundaryNorm + explicit per-class patches (original had mis-ordered
+     auto-label colours).
+
+Outputs:
+  results/study1/evaluation/<mask_type>/per_image_results.json
+  results/study1/evaluation/<mask_type>/income_summaries.json
+  results/study1/evaluation/<mask_type>/overall_summary.json
+  results/study1/figures/figure7_damage_mask_comparison.png
+"""
+
+import sys, json
 from pathlib import Path
 from tqdm import tqdm
+
 import numpy as np
 from PIL import Image
 from sklearn.metrics import precision_score, recall_score, f1_score, jaccard_score
-import json
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import matplotlib.colors as mcolors
+from matplotlib.colors import BoundaryNorm
 
-SCRIPT_DIR = Path(__file__).parent
-PROJECT_ROOT = SCRIPT_DIR.parent.parent if "study1" in str(SCRIPT_DIR) else SCRIPT_DIR.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+SCRIPT_DIR   = Path(__file__).parent
+PROJECT_ROOT = SCRIPT_DIR.parent
 
-# -------------------------
-# Configuration
-# -------------------------
+# ─────────────────────────────────────────────
+# Config
+# ─────────────────────────────────────────────
 class Config:
-    masks_dir = PROJECT_ROOT / "results" / "study1" / "masks"
-    output_dir = PROJECT_ROOT / "results" / "study1" / "evaluation"
-    
-    income_levels = ['lic', 'mic', 'hic']
+    masks_dir   = PROJECT_ROOT / "results" / "study1" / "masks"
+    output_dir  = PROJECT_ROOT / "results" / "study1" / "evaluation"
+    figures_dir = PROJECT_ROOT / "results" / "study1" / "figures"
+    income_levels = ["lic", "mic", "hic"]
+    # Damage class colour map  (classes 0-3)
+    CLASS_COLORS = ["#d9d9d9", "#fee08b", "#f46d43", "#d73027"]
+    CLASS_LABELS = ["No damage", "Minor damage", "Major damage", "Destroyed"]
+    N_CLASSES    = 4
 
 config = Config()
 
-# -------------------------
-# Metric Functions
-# -------------------------
-def compute_mask_metrics(pred_mask, true_mask):
+# ─────────────────────────────────────────────
+# Colour-map helpers  (fixes Figure 7 legend bug)
+# ─────────────────────────────────────────────
+def _damage_cmap_norm():
+    cmap   = mcolors.ListedColormap(config.CLASS_COLORS)
+    bounds = [-0.5, 0.5, 1.5, 2.5, 3.5]
+    norm   = BoundaryNorm(bounds, cmap.N)
+    return cmap, norm
+
+def _damage_patches():
+    return [
+        mpatches.Patch(facecolor=c, label=l, edgecolor="black", linewidth=0.5)
+        for c, l in zip(config.CLASS_COLORS, config.CLASS_LABELS)
+    ]
+
+# ─────────────────────────────────────────────
+# Metrics
+# ─────────────────────────────────────────────
+def compute_mask_metrics(pred: np.ndarray, true: np.ndarray) -> dict:
     """
-    Compute segmentation metrics between predicted and true masks.
-    
-    Original function from evaluation code.
-    
-    Args:
-        pred_mask: Predicted damage mask (numpy array)
-        true_mask: Ground truth damage mask (numpy array)
-    
-    Returns:
-        Dictionary with IoU, Dice, Precision, Recall
+    Weighted pixel-level metrics. Keys: IoU, Dice, Precision, Recall.
+    NOTE: 'F1' key intentionally absent — it was an alias for Dice and caused
+    a KeyError because compute_mask_metrics never populated it.
     """
-    pred = pred_mask.flatten().astype(int)
-    true = true_mask.flatten().astype(int)
-    
+    p = pred.flatten().astype(int)
+    t = true.flatten().astype(int)
     return {
-        'IoU': jaccard_score(true, pred, average='weighted', zero_division=0),
-        'Dice': f1_score(true, pred, average='weighted', zero_division=0),
-        'Precision': precision_score(true, pred, average='weighted', zero_division=0),
-        'Recall': recall_score(true, pred, average='weighted', zero_division=0)
+        "IoU":       float(jaccard_score  (t, p, average="weighted", zero_division=0)),
+        "Dice":      float(f1_score       (t, p, average="weighted", zero_division=0)),
+        "Precision": float(precision_score(t, p, average="weighted", zero_division=0)),
+        "Recall":    float(recall_score   (t, p, average="weighted", zero_division=0)),
     }
 
-def compute_ci(arr):
-    """
-    Compute 95% confidence interval.
-    """
-    mean = np.mean(arr)
-    std_err = np.std(arr) / np.sqrt(len(arr))
-    return (mean - 1.96 * std_err, mean + 1.96 * std_err)
+def _ci(arr):
+    a  = np.asarray(arr, dtype=float)
+    se = np.std(a, ddof=1) / np.sqrt(len(a))
+    return (float(np.mean(a) - 1.96 * se), float(np.mean(a) + 1.96 * se))
 
-# -------------------------
-# Main Evaluation Function
-# -------------------------
+def _summarise(vals):
+    a = np.asarray(vals, dtype=float)
+    return {"mean": float(np.mean(a)), "median": float(np.median(a)),
+            "std":  float(np.std(a, ddof=1)), "95_ci": list(_ci(a))}
+
+# ─────────────────────────────────────────────
+# Figure 7
+# ─────────────────────────────────────────────
+def make_figure7(triplets: list, out_path: Path):
+    if not triplets:
+        print("  [Figure 7] No triplets — skipping.")
+        return
+
+    cmap, norm = _damage_cmap_norm()
+    n = len(triplets)
+    fig, axes = plt.subplots(n, 2, figsize=(6, 2.8 * n), squeeze=False)
+    fig.suptitle("Figure 7 — Real vs. Synthetic Damage Masks",
+                 fontsize=12, fontweight="bold", y=1.01)
+    axes[0][0].set_title("Real mask",      fontsize=10, pad=6)
+    axes[0][1].set_title("Synthetic mask", fontsize=10, pad=6)
+
+    for row, trip in enumerate(triplets):
+        income = trip.get("income", "")
+        event  = trip.get("event", income.upper())
+        for col, key in enumerate(["real_mask_path", "syn_mask_path"]):
+            ax  = axes[row][col]
+            pth = Path(trip[key])
+            if pth.exists():
+                mask = np.clip(np.array(Image.open(pth).convert("L")),
+                               0, config.N_CLASSES - 1)
+                ax.imshow(mask, cmap=cmap, norm=norm, interpolation="nearest")
+            else:
+                ax.text(0.5, 0.5, "not found", ha="center", va="center",
+                        transform=ax.transAxes, fontsize=7)
+            ax.axis("off")
+        axes[row][0].set_ylabel(f"{event}\n[{income.upper()}]",
+                                fontsize=8, rotation=0, labelpad=60, va="center")
+
+    fig.legend(handles=_damage_patches(), title="Damage class",
+               title_fontsize=8, fontsize=7, loc="lower center",
+               ncol=config.N_CLASSES, bbox_to_anchor=(0.5, -0.02),
+               frameon=True, edgecolor="grey")
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  [Figure 7] → {out_path}")
+
+# ─────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────
 def evaluate_quality():
-    """Evaluate synthetic image quality across income levels and mask types."""
-    
-    print("="*60)
-    print("Evaluating Synthetic Image Quality")
-    print("="*60)
-    print(f"Masks directory: {config.masks_dir}")
-    print(f"Output directory: {config.output_dir}\n")
-    
+    print("=" * 60)
+    print("07  —  Synthetic Image Quality Evaluation  (Study 1)")
+    print("=" * 60)
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Evaluate both binary and multiclass
-    for mask_type in ['binary', 'multiclass']:
-        print(f"\n{'='*60}")
-        print(f"Evaluating {mask_type.upper()} Masks")
-        print(f"{'='*60}\n")
-        
-        all_results = []
-        income_results = {income: [] for income in config.income_levels}
-        
-        # Evaluate each income level
+    config.figures_dir.mkdir(parents=True, exist_ok=True)
+
+    figure7_triplets = []
+
+    for mask_type in ["binary", "multiclass"]:
+        print(f"\n{mask_type.upper()} masks")
+        all_results    = []
+        income_results = {inc: [] for inc in config.income_levels}
+
         for income in config.income_levels:
-            real_mask_dir = config.masks_dir / "real" / mask_type / income
-            synthetic_mask_dir = config.masks_dir / "synthetic" / mask_type / income
-            
-            # Find matching mask pairs
-            real_masks = {f.name: f for f in real_mask_dir.glob("*.png")}
-            synthetic_masks = {f.name: f for f in synthetic_mask_dir.glob("*.png")}
-            
-            # Match by base filename (before mask suffix)
+            real_dir = config.masks_dir / "real"      / mask_type / income
+            syn_dir  = config.masks_dir / "synthetic" / mask_type / income
+            if not real_dir.exists():
+                continue
+
+            real_masks = {f.name: f for f in real_dir.glob("*.png")}
             pair_count = 0
-            
-            print(f"Processing {income.upper()}")
-            
-            for real_name, real_path in tqdm(real_masks.items(), desc=f"{income.upper()}"):
-                # Find corresponding synthetic mask
-                # Real: *_binary_mask.png or *_multiclass_mask.png
-                # Synthetic: same naming
-                synthetic_path = synthetic_mask_dir / real_name
-                
-                if not synthetic_path.exists():
+
+            for real_name, real_path in tqdm(real_masks.items(),
+                                             desc=f"  {income.upper()}"):
+                syn_path = syn_dir / real_name
+                if not syn_path.exists():
                     continue
-                
                 try:
-                    # Load masks
-                    real_mask = np.array(Image.open(real_path).convert('L'))
-                    synthetic_mask = np.array(Image.open(synthetic_path).convert('L'))
-                    
-                    # Compute metrics
-                    metrics = compute_mask_metrics(synthetic_mask, real_mask)
-                    
-                    # Store results
-                    result = {
-                        'filename': real_name,
-                        'income': income,
-                        **metrics
-                    }
-                    
-                    all_results.append(result)
+                    real_mask = np.array(Image.open(real_path).convert("L"))
+                    syn_mask  = np.array(Image.open(syn_path ).convert("L"))
+                    metrics   = compute_mask_metrics(syn_mask, real_mask)
+
+                    all_results.append({"filename": real_name, "income": income,
+                                        **metrics})
                     income_results[income].append(metrics)
                     pair_count += 1
-                    
-                except Exception as e:
-                    print(f"\n Error processing {real_name}: {e}")
-                    continue
-            
-            print(f"  Evaluated {pair_count} mask pairs\n")
-        
-        if len(all_results) == 0:
-            print(f"No results for {mask_type} masks")
-            continue
-        
-        # Compute statistics per income level
-        income_summaries = {}
-        
-        for income in config.income_levels:
-            if len(income_results[income]) == 0:
-                continue
-            
-            iou_vals = [m['IoU'] for m in income_results[income]]
-            dice_vals = [m['Dice'] for m in income_results[income]]
-            f1_vals = [m['F1'] for m in income_results[income]]
-            prec_vals = [m['Precision'] for m in income_results[income]]
-            rec_vals = [m['Recall'] for m in income_results[income]]
-            
-            income_summaries[income] = {
-                'n_samples': len(income_results[income]),
-                'IoU': {
-                    'mean': float(np.mean(iou_vals)),
-                    'median': float(np.median(iou_vals)),
-                    'std': float(np.std(iou_vals)),
-                    '95_ci': [float(x) for x in compute_ci(iou_vals)]
-                },
-                'Dice': {
-                    'mean': float(np.mean(dice_vals)),
-                    'median': float(np.median(dice_vals)),
-                    'std': float(np.std(dice_vals)),
-                    '95_ci': [float(x) for x in compute_ci(dice_vals)]
-                },
-                'F1': {
-                    'mean': float(np.mean(f1_vals)),
-                    'median': float(np.median(f1_vals)),
-                    'std': float(np.std(f1_vals)),
-                    '95_ci': [float(x) for x in compute_ci(f1_vals)]
-                },
-                'Precision': {
-                    'mean': float(np.mean(prec_vals)),
-                    'median': float(np.median(prec_vals)),
-                    'std': float(np.std(prec_vals)),
-                    '95_ci': [float(x) for x in compute_ci(prec_vals)]
-                },
-                'Recall': {
-                    'mean': float(np.mean(rec_vals)),
-                    'median': float(np.median(rec_vals)),
-                    'std': float(np.std(rec_vals)),
-                    '95_ci': [float(x) for x in compute_ci(rec_vals)]
-                }
-            }
-        
-        # Compute overall statistics
-        all_iou = [r['IoU'] for r in all_results]
-        all_dice = [r['Dice'] for r in all_results]
-        all_f1 = [r['F1'] for r in all_results]
-        all_prec = [r['Precision'] for r in all_results]
-        all_rec = [r['Recall'] for r in all_results]
-        
-        overall_summary = {
-            'n_samples': len(all_results),
-            'IoU': {
-                'mean': float(np.mean(all_iou)),
-                'median': float(np.median(all_iou)),
-                'std': float(np.std(all_iou)),
-                '95_ci': [float(x) for x in compute_ci(all_iou)]
-            },
-            'Dice': {
-                'mean': float(np.mean(all_dice)),
-                'median': float(np.median(all_dice)),
-                'std': float(np.std(all_dice)),
-                '95_ci': [float(x) for x in compute_ci(all_dice)]
-            },
-            'F1': {
-                'mean': float(np.mean(all_f1)),
-                'median': float(np.median(all_f1)),
-                'std': float(np.std(all_f1)),
-                '95_ci': [float(x) for x in compute_ci(all_f1)]
-            },
-            'Precision': {
-                'mean': float(np.mean(all_prec)),
-                'median': float(np.median(all_prec)),
-                'std': float(np.std(all_prec)),
-                '95_ci': [float(x) for x in compute_ci(all_prec)]
-            },
-            'Recall': {
-                'mean': float(np.mean(all_rec)),
-                'median': float(np.median(all_rec)),
-                'std': float(np.std(all_rec)),
-                '95_ci': [float(x) for x in compute_ci(all_rec)]
-            }
-        }
-        
-        # Save results
-        output_mask_dir = config.output_dir / mask_type
-        output_mask_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Save per-image results
-        with open(output_mask_dir / "per_image_results.json", 'w') as f:
-            json.dump(all_results, f, indent=2)
-        
-        # Save income-level summaries
-        with open(output_mask_dir / "income_summaries.json", 'w') as f:
-            json.dump(income_summaries, f, indent=2)
-        
-        # Save overall summary
-        with open(output_mask_dir / "overall_summary.json", 'w') as f:
-            json.dump(overall_summary, f, indent=2)
-        
-        # Print summary
-        print(f"\n{mask_type.upper()} Results Summary:")
-        print(f"{'='*60}")
-        print(f"Overall (n={overall_summary['n_samples']}):")
-        print(f"  IoU:       {overall_summary['IoU']['mean']:.4f} ± {overall_summary['IoU']['std']:.4f}")
-        print(f"  Dice:      {overall_summary['Dice']['mean']:.4f} ± {overall_summary['Dice']['std']:.4f}")
-        print(f"  Precision: {overall_summary['Precision']['mean']:.4f} ± {overall_summary['Precision']['std']:.4f}")
-        print(f"  Recall:    {overall_summary['Recall']['mean']:.4f} ± {overall_summary['Recall']['std']:.4f}")
-        
-        print(f"\nBy Income Level:")
-        for income, summary in income_summaries.items():
-            print(f"\n  {income.upper()} (n={summary['n_samples']}):")
-            print(f"    IoU:       {summary['IoU']['mean']:.4f} ± {summary['IoU']['std']:.4f}")
-            print(f"    Dice:      {summary['Dice']['mean']:.4f} ± {summary['Dice']['std']:.4f}")
-            print(f"    Precision: {summary['Precision']['mean']:.4f} ± {summary['Precision']['std']:.4f}")
-            print(f"    Recall:    {summary['Recall']['mean']:.4f} ± {summary['Recall']['std']:.4f}")
-        
-        print(f"\nResults saved to: {output_mask_dir}")
-    
-    print("\n" + "="*60)
-    print("EVALUATION COMPLETE")
-    print("="*60)
-    print(f"All results saved to: {config.output_dir}")
-    print("="*60 + "\n")
 
-# -------------------------
-# CLI
-# -------------------------
+                    if mask_type == "multiclass" and pair_count == 1:
+                        figure7_triplets.append({
+                            "income": income,
+                            "event":  real_name.split("_")[0],
+                            "real_mask_path": str(real_path),
+                            "syn_mask_path":  str(syn_path),
+                        })
+                except Exception as exc:
+                    print(f"\n  [error] {real_name}: {exc}")
+
+            print(f"    {income.upper()}: {pair_count} pairs evaluated")
+
+        if not all_results:
+            print(f"  No results for {mask_type}")
+            continue
+
+        # Per-income summaries  (no 'F1' key — fixed)
+        income_summaries = {}
+        for income in config.income_levels:
+            vals = income_results[income]
+            if not vals:
+                continue
+            income_summaries[income] = {
+                "n_samples": len(vals),
+                "IoU":       _summarise([m["IoU"]       for m in vals]),
+                "Dice":      _summarise([m["Dice"]      for m in vals]),
+                "Precision": _summarise([m["Precision"] for m in vals]),
+                "Recall":    _summarise([m["Recall"]    for m in vals]),
+            }
+
+        overall = {
+            "n_samples": len(all_results),
+            "IoU":       _summarise([r["IoU"]       for r in all_results]),
+            "Dice":      _summarise([r["Dice"]      for r in all_results]),
+            "Precision": _summarise([r["Precision"] for r in all_results]),
+            "Recall":    _summarise([r["Recall"]    for r in all_results]),
+        }
+
+        out_dir = config.output_dir / mask_type
+        out_dir.mkdir(parents=True, exist_ok=True)
+        with open(out_dir / "per_image_results.json", "w") as fh:
+            json.dump(all_results, fh, indent=2)
+        with open(out_dir / "income_summaries.json", "w") as fh:
+            json.dump(income_summaries, fh, indent=2)
+        with open(out_dir / "overall_summary.json", "w") as fh:
+            json.dump(overall, fh, indent=2)
+
+        # Print
+        ov = overall
+        print(f"\n  Overall (n={ov['n_samples']}):")
+        print(f"    IoU  {ov['IoU']['mean']:.4f} ± {ov['IoU']['std']:.4f}")
+        print(f"    Dice {ov['Dice']['mean']:.4f} ± {ov['Dice']['std']:.4f}")
+        for inc, sm in income_summaries.items():
+            print(f"  {inc.upper()} (n={sm['n_samples']}):  "
+                  f"IoU={sm['IoU']['mean']:.4f}  Dice={sm['Dice']['mean']:.4f}")
+
+    print("\nGenerating Figure 7 …")
+    make_figure7(figure7_triplets,
+                 config.figures_dir / "figure7_damage_mask_comparison.png")
+
+    print("\n" + "=" * 60)
+    print("EVALUATION COMPLETE")
+    print(f"  Results → {config.output_dir}")
+    print(f"  Figures → {config.figures_dir}")
+    print("=" * 60)
+
+
 if __name__ == "__main__":
     evaluate_quality()

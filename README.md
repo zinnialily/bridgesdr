@@ -25,7 +25,7 @@ This work provides the first comprehensive evaluation of synthetic disaster imag
 - [Installation](#installation)
 - [Usage Instructions](#usage-instructions)
 - [Methodology](#methodology)
-- [Model Architecture](#model-architecture)
+- [Model Architectures](#model-architectures)
 - [Citations](#citations)
 - [License](#license)
 - [Acknowledgments](#acknowledgments)
@@ -41,12 +41,11 @@ This research utilizes three complementary disaster imagery datasets:
 **Description:** High-resolution optical imagery dataset for building damage assessment from satellite imagery.
 
 **Usage in this project:**
-- **Synthetic Imagery Quality Assessment:** Training DisasterGAN with paired pre/post-disaster imagery
-- **Training Effectiveness Assessment:** Baseline model training
+- **Synthetic Imagery Quality Assessment (Study 1):** Training DisasterGAN with paired pre/post-disaster imagery
 
-**Image Modalities:** 
+**Image Modalities:**
 - Pre-disaster RGB optical imagery
-- Post-disaster RGB optical imagery  
+- Post-disaster RGB optical imagery
 - Multi-class building-level damage masks (4 classes: none, minor, major, destroyed)
 
 **DOI/URL:** https://xview2.org/dataset
@@ -55,8 +54,8 @@ This research utilizes three complementary disaster imagery datasets:
 
 **Citation:**
 ```
-Gupta, V., Dhu, R., Campbell, R., Truong, A., Xu, T., Erickson, D., ... & Hamann, B. (2019). 
-xBD: A dataset for assessing building damage from satellite imagery. 
+Gupta, V., Dhu, R., Campbell, R., Truong, A., Xu, T., Erickson, D., ... & Hamann, B. (2019).
+xBD: A dataset for assessing building damage from satellite imagery.
 In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops (pp. 10-17).
 ```
 
@@ -70,8 +69,8 @@ In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recogni
 **Description:** Globally distributed multimodal building damage assessment dataset with very-high-resolution imagery for all-weather disaster response.
 
 **Usage in this project:**
-- **Synthetic Imagery Quality Assessment:** Test set for evaluating DisasterGAN output realism
-- **Training Effectiveness Assessment:** Fine-tuning and testing data stratified by economic context
+- **Synthetic Imagery Quality Assessment (Study 1):** Test set for evaluating DisasterGAN output realism
+- **Training Effectiveness Assessment (Study 2):** Fine-tuning and testing data stratified by economic context
 
 **Image Modalities:**
 - Pre-disaster optical imagery
@@ -80,35 +79,26 @@ In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recogni
 
 **Economic Stratification:**
 - **LIC (Low-Income Countries):** Haiti, Congo
-- **MIC (Middle-Income Countries):** Turkey, Morocco, Libya  
-- **HIC (High-Income Countries):** Noto (Italy), La Palma (Spain), Hawaii (USA)
+- **MIC (Middle-Income Countries):** Turkey, Morocco, Libya, Bata (Equatorial Guinea), Beirut
+- **HIC (High-Income Countries):** Noto (Italy), La Palma (Spain), Hawaii (USA), Marshall Islands
 
 **DOI:** https://zenodo.org/records/15385983
 
 **Citation:**
 ```
-Chen, H., Song, J., Dietrich, O., Broni-Bediako, C., Xuan, W., Wang, J., ... & Yokoya, N. (2025). 
-BRIGHT: A globally distributed multimodal building damage assessment dataset with very-high-resolution 
+Chen, H., Song, J., Dietrich, O., Broni-Bediako, C., Xuan, W., Wang, J., ... & Yokoya, N. (2025).
+BRIGHT: A globally distributed multimodal building damage assessment dataset with very-high-resolution
 for all-weather disaster response.
 ```
+
 ### 3. Sentinel-1/2 Image Pairs Dataset
 
-**Description:** Paired SAR (Sentinel-1) and optical (Sentinel-2) satellite imagery across diverse terrain types for cross-modal analysis.
+**Description:** Paired SAR (Sentinel-1) and optical (Sentinel-2) satellite imagery across diverse terrain types for cross-modal validation.
 
 **Usage in this project:**
-- **Appendix Testing:** Validation of the simplified SAR-to-optical approximation methodology
-- Evaluates conversion quality across four terrain types: urban, agricultural, grassland, and barren land
+- **Appendix Testing:** Validation of the SAR-to-optical approximation methodology
 
-**Image Modalities:**
-- Sentinel-1 SAR imagery (S1 - C-band synthetic aperture radar)
-- Sentinel-2 optical imagery (S2 - multispectral optical)
-- Organized by terrain type for systematic evaluation
-
-**Terrain Types:**
-- Urban
-- Agricultural
-- Grassland
-- Barren land
+**Terrain Types:** Urban, Agricultural, Grassland, Barren land
 
 **Kaggle Download:** https://www.kaggle.com/datasets/requiemonk/sentinel12-image-pairs-segregated-by-terrain/data
 
@@ -116,8 +106,8 @@ for all-weather disaster response.
 
 **Citation:**
 ```
-Tiwari, R. K., Gupta, R. P., & Arora, M. K. (2022). 
-Sentinel-1 and Sentinel-2 Data for Land Use/Land Cover Mapping. 
+Tiwari, R. K., Gupta, R. P., & Arora, M. K. (2022).
+Sentinel-1 and Sentinel-2 Data for Land Use/Land Cover Mapping.
 Technical University of Munich, Mediatum.
 ```
 
@@ -131,41 +121,51 @@ bridgesdr/
 │   ├── xbd_raw/
 │   ├── bright_raw/
 │   ├── xbd/
-│   │   ├── train/images/
-│   │   ├── train/labels/
-│   │   ├── test/images/
-│   │   ├── test/labels/
-│   │   ├── tier1/, tier3/, hold/
+│   │   ├── train/images/, train/labels/
+│   │   └── test/images/,  test/labels/
 │   └── bright/
-│       ├── lic/images/, lic/masks/
-│       ├── mic/images/, mic/masks/
-│       └── hic/images/, hic/masks/
+│       ├── lic/manifest_train.json, lic/manifest_val.json, lic/manifest.json
+│       ├── mic/manifest_train.json, mic/manifest_val.json, mic/manifest.json
+│       └── hic/manifest_train.json, hic/manifest_val.json, hic/manifest.json
 │
 ├── reproduction_scripts/
-│   ├── 00_* (optional setup)
+│   ├── 00_setup_environment.sh       (optional)
 │   ├── 01_download_datasets.sh
 │   └── 02_preprocess_data.py
 │
-├── synthetic_imagery_quality_assessment/
+├── synthetic_imagery_quality_assessment/    ← Study 1: DisasterGAN (optical domain)
 │   ├── 03_train_disastergan.py
 │   ├── 04_generate_synthetic_images.py
-│   ├── 05_convert_optical_to_sar.py
+│   ├── 04b_compute_fid_is.py              ← FID & Inception Score
 │   ├── 06_generate_damage_masks.py
-│   └── 07_evaluate_quality_metrics.py
+│   ├── 07_evaluate_quality_metrics.py
+│   └── 15a_visualize_synthesis.py         ← Qualitative synthesis grids
 │
-├── training_effectiveness_assessment/
+├── training_effectiveness_assessment/      ← Study 2: BRIGHT segmentation
+│   ├── _08_shared.py                      ← Shared dataset, training loop, metrics
+│   ├── _model_registry.py                 ← U-Net, SegFormer-B2, ChangeFormer
 │   ├── 08_train_baseline_unet.py
-│   ├── 09_finetune_half_stage.py
-│   ├── 10_finetune_full_stage.py
-│   └── 11_evaluation.py
+│   ├── 08b_train_segformer.py
+│   ├── 08c_train_changeformer.py
+│   ├── 09_finetune_half_stage.py          ← Stage 1: freeze encoder
+│   ├── 10_finetune_full_stage.py          ← Stage 2: all layers
+│   ├── 11_evaluation.py                   ← Full evaluation (all models × stages)
+│   ├── 13_sample_size_correlation.py      ← Confound analysis: sample size
+│   ├── 14_disaster_type_analysis.py       ← Confound analysis: disaster type
+│   └── 15b_qualitative_results.py        ← Qualitative segmentation grids
 │
 ├── appendix_testing/
-│   ├── 12_sar_to_optical_validation.py
+│   └── 12_sar_to_optical_validation.py
+│
 ├── checkpoints/
+│   ├── disastergan/
+│   │   ├── disastergan_generator_final.pth
+│   │   └── disastergan_discriminator_final.pth
+│   └── unet_study2/                       ← Pre-trained U-Net checkpoints
+│
 ├── ATTRIBUTION.md
 ├── requirements.txt
 └── README.md
-
 ```
 
 ---
@@ -219,19 +219,14 @@ chmod 600 ~/.kaggle/kaggle.json
 ### Step 1: Download Datasets
 
 ```bash
-# Download both datasets
 bash reproduction_scripts/01_download_datasets.sh
-
-# Or download individually
-bash reproduction_scripts/01_download_datasets.sh --xbd-only
-bash reproduction_scripts/01_download_datasets.sh --bright-only
 ```
 
 **Note:** xBD download requires Kaggle API credentials. BRIGHT downloads from Zenodo (~15GB).
 
 **Output:**
-- `data/xbd_raw/` - Raw xBD dataset
-- `data/bright_raw/` - Raw BRIGHT dataset with pre-event/, post-event/, target/ folders
+- `data/xbd_raw/` — Raw xBD dataset
+- `data/bright_raw/` — Raw BRIGHT dataset with pre-event/, post-event/, target/ folders
 
 ### Step 2: Preprocess Data
 
@@ -239,7 +234,7 @@ bash reproduction_scripts/01_download_datasets.sh --bright-only
 # Process both datasets
 python reproduction_scripts/02_preprocess_data.py
 
-# Process specific datasets
+# Or selectively
 python reproduction_scripts/02_preprocess_data.py --xbd-only
 python reproduction_scripts/02_preprocess_data.py --bright-only
 
@@ -248,168 +243,175 @@ python reproduction_scripts/02_preprocess_data.py --verify
 ```
 
 **What this does:**
-- Organizes xBD by splits (train/test/tier1/tier3/hold) with pre/post disaster pairs
-- Stratifies BRIGHT by economic level (LIC/MIC/HIC)
-- Matches pre-disaster, post-disaster, and damage mask triplets
-- Validates naming conventions
+- **BRIGHT:** Scans 11 unrestricted events, builds train/val manifests per income stratum (split by event, not tile, to prevent data leakage)
+- **xBD:** Organises pre/post pairs into train/test splits for DisasterGAN (Study 1 only — never mixed into BRIGHT)
 
-**Output:**
-- `data/xbd/{split}/images/*_pre_disaster.png`
-- `data/xbd/{split}/images/*_post_disaster.png`
-- `data/xbd/{split}/labels/*.json`
-- `data/bright/{lic,mic,hic}/images/*_pre_disaster.*`
-- `data/bright/{lic,mic,hic}/images/*_post_disaster.tif`
-- `data/bright/{lic,mic,hic}/masks/*_damage_mask.png`
+### Step 3: Synthetic Imagery Quality Assessment (Study 1)
 
-### Step 3: Synthetic Imagery Quality Assessment
+> **Pre-trained DisasterGAN checkpoints are already provided** in `checkpoints/disastergan/`. Training is optional.
 
-#### Important: Pre-Trained Checkpoints Available
-
-**DisasterGAN checkpoints are already provided in the repository:**
-- `checkpoints/disastergan/disastergan_generator_final.pth`
-- `checkpoints/disastergan/disastergan_discriminator_final.pth`
-
-**Training is OPTIONAL.** You can skip directly to image generation if you want to use the pre-trained models.
-
-If using pre-trained checkpoints (reccomended):
+**Using pre-trained checkpoints (recommended):**
 ```bash
 cd synthetic_imagery_quality_assessment
 
-# Generate synthetic images
+# Generate synthetic post-disaster images
 python 04_generate_synthetic_images.py
 
-# Convert to SAR
-python 05_convert_optical_to_sar.py
+# Compute FID and Inception Score
+python 04b_compute_fid_is.py
 
-# Generate damage masks
+# Generate damage masks from synthetic images
 python 06_generate_damage_masks.py
 
-# Evaluate quality
+# Evaluate mask quality (IoU, Dice)
 python 07_evaluate_quality_metrics.py
+
+# Qualitative visualisation grids
+python 15a_visualize_synthesis.py
 ```
-If training from scratch:
-- Add python ```bash 03_train_disastergan.py``` at the beginning
-- Follow the same steps above for generation and evaluation
 
----
-### Step 4: Training Effectiveness Assessment
-#### Option A: Skip Training (Use Existing Checkpoints)
-There are already trained model checkpoints in checkpoints/unet_study2/, so you can skip directly to evaluation.
-Evaluate Each Checkpoint:
-Run 11_evaluation.py separately for each checkpoint by modifying the CHECKPOINT variable in the script:
-bash
-```cd reproduction_scripts/training_effectiveness_assessment
-# Evaluate baseline model
-# Edit line 14 in 11_evaluation.py: CHECKPOINT = "checkpoints/unet_study2/baseline_unet.pth"
-python 11_evaluation.py
+**Training DisasterGAN from scratch (optional):**
+```bash
+python 03_train_disastergan.py  # then run steps above
+```
 
-# Evaluate LIC half-finetuned
-# Edit line 14: CHECKPOINT = "checkpoints/unet_study2/lic_half_finetuned_unet.pth"
-python 11_evaluation.py
+### Step 4: Training Effectiveness Assessment (Study 2)
 
-# Evaluate LIC full-finetuned
-# Edit line 14: CHECKPOINT = "checkpoints/unet_study2/lic_full_finetuned_unet.pth"
-python 11_evaluation.py
+Study 2 uses **BRIGHT only** — no xBD data is mixed in. Three models are evaluated: U-Net, SegFormer-B2, and ChangeFormer.
 
-# Evaluate MIC half-finetuned
-# Edit line 14: CHECKPOINT = "checkpoints/unet_study2/mic_half_finetuned_unet.pth"
-python 11_evaluation.py
+#### Option A: Use existing checkpoints (skip to evaluation)
 
-# Evaluate MIC full-finetuned
-# Edit line 14: CHECKPOINT = "checkpoints/unet_study2/mic_full_finetuned_unet.pth"
-python 11_evaluation.py
+Pre-trained U-Net checkpoints are available in `checkpoints/unet_study2/`. Run evaluation directly:
 
-# Evaluate HIC half-finetuned
-# Edit line 14: CHECKPOINT = "checkpoints/unet_study2/hic_half_finetuned_unet.pth"
-python 11_evaluation.py
-
-# Evaluate HIC full-finetuned
-# Edit line 14: CHECKPOINT = "checkpoints/unet_study2/hic_full_finetuned_unet.pth"
+```bash
+cd training_effectiveness_assessment
 python 11_evaluation.py
 ```
-#### Option B: Train Models from Scratch (Optional)
-If you need to train the models yourself, follow these steps. Note: The training scripts currently output to checkpoints/study2/, so you'll need to either:
-Modify CHECKPOINT_DIR in scripts 08, 09, and 10 to "checkpoints/unet_study2/", OR
-Move the generated checkpoints after training
 
-bash
-```cd reproduction_scripts/training_effectiveness_assessment
+#### Option B: Train all models from scratch
+
+```bash
+cd training_effectiveness_assessment
+
+# Baseline training (all 3 models × 3 strata)
 python 08_train_baseline_unet.py
+python 08b_train_segformer.py
+python 08c_train_changeformer.py
+
+# Stage 1: freeze encoder, fine-tune decoder
 python 09_finetune_half_stage.py
+
+# Stage 2: full fine-tuning, all layers
 python 10_finetune_full_stage.py
+
+# Full evaluation (all models × stages × strata)
+python 11_evaluation.py
 ```
-After training (or if using existing checkpoints), evaluate each model using:
-bash ```python 11_evaluation.py```
-Remember to modify the CHECKPOINT variable in the script for each model you want to evaluate.
+
+**Checkpoint naming convention:**
+- `checkpoints/<model>_baseline_<income>.pth`
+- `checkpoints/<model>_stage1_<income>.pth`
+- `checkpoints/<model>_stage2_<income>.pth`
+
+where `<model>` ∈ {unet, segformer, changeformer} and `<income>` ∈ {lic, mic, hic}.
+
+#### Confound Analyses (requires 11_evaluation.py output)
+
+```bash
+# Sample size confound (Spearman ρ + OLS)
+python 13_sample_size_correlation.py
+
+# Disaster type confound (Kruskal-Wallis + two-factor OLS)
+python 14_disaster_type_analysis.py
+```
+
+#### Qualitative Visualisation
+
+```bash
+# Segmentation grids: pre-optical | post-SAR | GT mask | prediction
+python 15b_qualitative_results.py
+python 15b_qualitative_results.py --n_examples 8 --seed 123
+```
 
 ---
 
 ## Methodology
 
-### Experimental Design
+### Two-Study Design
 
-This research employs a two-part experimental framework:
+This research uses a clean two-study framework to avoid cross-modality contamination:
 
-1. **Synthetic Imagery Quality Assessment:** Evaluates how well synthetic post-disaster images capture damage characteristics through damage mask comparison (IoU, Dice coefficient)
-
-2. **Training Effectiveness Assessment:** Determines whether synthetic imagery improves operational disaster response model performance through progressive fine-tuning experiments
+| Study | Domain | Data | Purpose |
+|-------|--------|------|---------|
+| **Study 1** | Optical → Optical | xBD only | Evaluate DisasterGAN synthesis quality (FID, IS, mask IoU) |
+| **Study 2** | Optical + SAR → Mask | BRIGHT only | Evaluate model training effectiveness across income strata |
 
 ### Economic Stratification
 
 BRIGHT dataset events are classified by World Bank GNI per capita:
 
-| Income Level | Countries | Classification Criteria |
-|-------------|-----------|------------------------|
-| **LIC** | Haiti, Congo | GNI per capita < $1,135 |
-| **MIC** | Turkey, Morocco, Libya | $1,136 - $13,845 |
-| **HIC** | Noto, La Palma, Hawaii | > $13,846 |
+| Income Level | Events | Classification Criteria |
+|-------------|--------|------------------------|
+| **LIC** | Haiti-earthquake, Congo-volcano | GNI per capita < $1,135 |
+| **MIC** | Turkey-earthquake, Morocco-earthquake, Libya-flood, Bata-explosion, Beirut-explosion | $1,136 – $13,845 |
+| **HIC** | Hawaii-wildfire, La Palma-volcano, Noto-earthquake, Marshall-wildfire | > $13,846 |
 
 ### Progressive Fine-Tuning Protocol
 
-**Stage 0 (Baseline):** Train U-Net on xBD only (no BRIGHT domain adaptation)
+**Stage 0 (Baseline):** Train on all BRIGHT strata combined — no stratum-specific adaptation
 
-**Stage 1 (Half Fine-Tuning):** 
+**Stage 1 (Half Fine-Tuning):**
 - Freeze encoder layers
 - Fine-tune decoder only
-- Minimal resource investment scenario
+- 20% cross-stratum augmentation from other income levels
 
 **Stage 2 (Full Fine-Tuning):**
 - Unfreeze all layers
-- Full network fine-tuning
-- Epoches with learning rate decay
-- Comprehensive adaptation scenario
+- Full network fine-tuning with cosine LR decay
+- 20% cross-stratum augmentation continues
 
 ---
 
-## Model Architecture
+## Model Architectures
 
 ### U-Net for Damage Segmentation
 
-**Input:** 256×256 image with 4 channels (RGB pre-disaster + SAR post-disaster)
+**Input:** 4-channel tensor (RGB pre-disaster + SAR post-disaster), 512×512
 
-**Output:** 256×256 segmentation mask with 4 classes:
-- Class 0: No damage
-- Class 1: Minor damage
-- Class 2: Major damage
-- Class 3: Destroyed
+**Output:** 4-class segmentation mask (none / minor / major / destroyed)
 
 **Architecture:**
-- **Encoder:** 4 downsampling blocks (64, 128, 256, 512 channels)
-- **Bottleneck:** 1024 channels at 16×16 resolution
-- **Decoder:** 4 upsampling blocks with skip connections
-- **Output:** 1×1 convolution to 4-class segmentation
+- Encoder: 4 downsampling blocks (64, 128, 256, 512 channels)
+- Bottleneck: 1024 channels
+- Decoder: 4 upsampling blocks with skip connections
 
 **Training Hyperparameters:**
-- Optimizer: Adam (lr=1e-3, weight_decay=1e-5)
-- Loss: CrossEntropyLoss with class weights [0.1, 1.0, 1.0, 1.0]
-- Batch size: 16
-- LR scheduler: ReduceLROnPlateau (patience=3, factor=0.5)
+- Optimizer: AdamW (lr=1e-3, weight_decay=1e-4)
+- Loss: CrossEntropyLoss with class weights [0.1, 1.0, 1.5, 2.0]
+- Epochs: 20 (baseline), 10 (fine-tune stages)
+- LR scheduler: CosineAnnealingLR
 
-### DisasterGAN Architecture
+### SegFormer-B2
 
-**Generator:** Takes pre-disaster optical imagery → generates post-disaster synthetic imagery
+**Input:** 4-channel (RGB + SAR), patch embedding extended from 3→4 channels via weight warm-start
 
-**Discriminator:** Distinguishes real vs. synthetic post-disaster images
+**Backbone:** nvidia/mit-b2 (HuggingFace transformers)
+
+**Training:** AdamW lr=6e-5 (lower than U-Net — pre-trained transformer)
+
+### ChangeFormer (Siamese Transformer)
+
+**Input:** Two separate 3-channel inputs — pre-event RGB and post-event SAR (replicated to 3 channels)
+
+**Architecture:** Siamese hierarchical encoder + difference-feature MLP decoder
+
+**Note:** SAR replication to 3 channels is a documented limitation; a proper bi-modal encoder is left for future work.
+
+### DisasterGAN
+
+**Generator:** Pre-disaster optical → synthetic post-disaster optical
+
+**Discriminator:** Real vs. synthetic post-disaster classification
 
 **Training:**
 - Optimizer: Adam (lr=2e-4, betas=(0.5, 0.999))
@@ -450,6 +452,7 @@ This project is licensed under the MIT License. See `LICENSE` file for details.
 - **xBD** — [Terms of Use](https://xview2.org/dataset)
 - **BRIGHT** — See Zenodo record for license information
 - **Sentinel-1 & 2 Image Pairs** — [Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/)
+
 ---
 
 ## Acknowledgments
@@ -460,31 +463,29 @@ This project is licensed under the MIT License. See `LICENSE` file for details.
 - **Humanitarian OpenStreetMap Team** for practical disaster response insights
 
 ---
+
 ## Troubleshooting
 
 ### Common Issues
 
 **1. Kaggle API credentials error:**
 ```bash
-# Ensure kaggle.json is in correct location
-ls ~/.kaggle/kaggle.json
-# Should exist with 600 permissions
+ls ~/.kaggle/kaggle.json   # should exist with 600 permissions
 ```
 
 **2. CUDA out of memory:**
-- Reduce batch size in training scripts
+- Reduce batch size in `_08_shared.py` (`BATCH_GPU`)
 - Use gradient accumulation
 - Try mixed precision training
 
 **3. Dataset file not found:**
-- Run preprocessing script with `--verify` flag
+- Run `python reproduction_scripts/02_preprocess_data.py --verify`
 - Check that downloads completed successfully
-- Verify directory structure matches expected format
 
-**4. Model checkpoint loading error:**
-- Ensure you're using the correct checkpoint for each stage
-- Check if training completed successfully
-- Verify checkpoint file exists and isn't corrupted
+**4. Model checkpoint not found:**
+- Verify checkpoint naming: `<model>_<stage>_<income>.pth`
+- Check that the preceding training stage completed
+- Checkpoints are saved in `checkpoints/`
 
 ---
 
